@@ -1,0 +1,30 @@
+# Dependencias gestionadas por el IDF Component Manager.
+# Verificar versiones exactas disponibles con:
+#   idf.py add-dependency "espressif/esp_video"
+#   idf.py add-dependency "espressif/esp_wifi_remote"
+#   idf.py add-dependency "espressif/esp_hosted"
+dependencies:
+  idf:
+    version: ">=5.5"
+
+  # Framework V4L2 oficial de Espressif: maneja el pipeline
+  # CSI -> ISP -> encoder H.264 por hardware (/dev/video0, /dev/video11).
+  # esp_cam_sensor (driver OV5647) NO se declara aca a mano: esp_video
+  # lo trae como dependencia transitiva con la version exacta que
+  # necesita (2.2.x/2.3.x segun la version de esp_video resuelta).
+  # Fijarlo manualmente en otra rama de version, como se hizo antes,
+  # choca con eso y el resolver de versiones falla.
+  espressif/esp_video:
+    version: "^2.2.0"
+
+  # El ESP32-P4 no tiene radio Wi-Fi propia: estos dos componentes
+  # oficiales dan Wi-Fi "remoto" a traves del coprocesador ESP32-C6/C2
+  # (SDIO o SPI). La API de aplicacion (esp_wifi_*) no cambia.
+  # OJO: el soporte para IDF v6.0 en esp_wifi_remote (carpeta idf_v6.0/)
+  # se agrego recien en la serie 1.1.x. Un rango ^0.x resuelve una
+  # version vieja sin esa carpeta y el build falla buscando
+  # esp_wifi_remote_weak.c. Por eso se pide >=1.1.0.
+  espressif/esp_wifi_remote:
+    version: "^1.1.0"
+  espressif/esp_hosted:
+    version: "^2.0.0"

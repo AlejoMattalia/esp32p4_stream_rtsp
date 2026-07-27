@@ -1,0 +1,55 @@
+menu "OV5647 RTSP Streamer Configuration"
+
+    menu "Camara / RTSP"
+
+        choice EXAMPLE_CAM_DEFAULT_RESOLUTION
+            prompt "Resolucion inicial (puede cambiarse desde main.c)"
+            default EXAMPLE_CAM_RES_VGA
+            help
+                Resolucion con la que arranca el stream. La capa de
+                aplicacion puede seleccionar otra en tiempo de ejecucion
+                llamando a cam_rtsp_init() con una resolucion distinta.
+
+            config EXAMPLE_CAM_RES_VGA
+                bool "VGA (640x480)"
+            config EXAMPLE_CAM_RES_720P
+                bool "HD 720p (1280x720)"
+        endchoice
+
+        config EXAMPLE_CAM_FPS
+            int "FPS objetivo"
+            range 5 30
+            default 20
+
+        config EXAMPLE_CAM_BITRATE_KBPS
+            int "Bitrate H.264 (kbps)"
+            range 256 8000
+            default 2000
+
+        config EXAMPLE_RTSP_PORT
+            int "Puerto RTSP"
+            default 554
+            help
+                Puerto TCP del servidor RTSP. 554 es el estandar
+                (rtsp://IP:554/stream). Se puede usar 8554 si el 554
+                genera conflictos con software de PC.
+
+        config EXAMPLE_CAM_SCCB_I2C_PORT
+            int "Puerto I2C (SCCB) de la camara"
+            default 0
+
+        config EXAMPLE_CAM_SCCB_SCL_GPIO
+            int "GPIO SCL (SCCB)"
+            default 8
+
+        config EXAMPLE_CAM_SCCB_SDA_GPIO
+            int "GPIO SDA (SCCB)"
+            default 7
+
+        config EXAMPLE_CAM_XCLK_FREQ_HZ
+            int "Frecuencia XCLK (Hz)"
+            default 24000000
+
+    endmenu
+
+endmenu

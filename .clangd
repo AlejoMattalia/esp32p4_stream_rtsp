@@ -1,0 +1,3 @@
+CompileFlags:
+  CompilationDatabase: /home/grivera/develop/firmware/trcom_firmware/caecus_repos/esp32p4_stream_rtsp/build
+  Remove: [-m*, -f*]

@@ -1,0 +1,22 @@
+Command: cmake -G Ninja -B /home/grivera/develop/firmware/trcom_firmware/caecus_repos/esp32p4_stream_rtsp/build -DPYTHON_DEPS_CHECKED=1 -DPYTHON=/home/grivera/.espressif/tools/python/v6.0/venv/bin/python -DESP_PLATFORM=1 -DSDKCONFIG=sdkconfig -DCCACHE_ENABLE=False /home/grivera/develop/firmware/trcom_firmware/caecus_repos/esp32p4_stream_rtsp
+info: Default value for PM_SLEEP_FUNC_IN_IRAM in sdkconfig is n but it is y according to Kconfig.
+Using default value from sdkconfig (n).
+info: Default value for PM_SLP_IRAM_OPT in sdkconfig is n but it is y according to Kconfig.
+Using default value from sdkconfig (n).
+Configuration Report                                                            
+ ────────────────────────────────────────────────────────────────────────────── 
+   Parser Version: 1                                                            
+   Verbosity: default                                                           
+   Defaults policy: sdkconfig                                                   
+   Status: Finished with notifications                                          
+                                                                                
+  Default Value Mismatch                                                        
+   ──────────────────────────────────────────────────────────────────────────   
+    Using sdkconfig default values                                              
+    Config symbols with different default value between sdkconfig and           
+    Kconfig                                                                     
+    PM_SLP_IRAM_OPT: Kconfig default value: y, sdkconfig default value: n       
+    PM_SLEEP_FUNC_IN_IRAM: Kconfig default value: y, sdkconfig default          
+    value: n                                                                    
+   ──────────────────────────────────────────────────────────────────────────   
+ ────────────────────────────────────────────────────────────────────────────── 
