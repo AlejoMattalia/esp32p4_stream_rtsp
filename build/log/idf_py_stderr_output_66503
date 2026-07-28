@@ -1,9 +1,0 @@
-Command: cmake -G Ninja -B /home/grivera/develop/firmware/trcom_firmware/caecus_repos/esp32p4_stream_rtsp/build -DPYTHON_DEPS_CHECKED=1 -DPYTHON=/home/grivera/.espressif/tools/python/v6.0/venv/bin/python -DESP_PLATFORM=1 -DCCACHE_ENABLE=False /home/grivera/develop/firmware/trcom_firmware/caecus_repos/esp32p4_stream_rtsp
-Configuration Report               
- ───────────────────────────────── 
-   Parser Version: 1               
-   Verbosity: default              
-   Defaults policy: sdkconfig      
-   Status: Finished successfully   
-                                   
- ───────────────────────────────── 
