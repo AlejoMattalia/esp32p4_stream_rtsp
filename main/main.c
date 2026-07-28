@@ -37,7 +37,7 @@ void app_main(void)
 
     uint16_t w, h;
     cam_rtsp_get_dimensions(&w, &h);
-
+	// en linux ejecutar ffplay -fflags nobuffer -flags low_delay -framedrop -strict experimental -rtsp_flags prefer_tcp rtsp://<IP>:554/stream
     ESP_LOGI(TAG, "=================================================");
     ESP_LOGI(TAG, "  Stream RTSP activo: rtsp://%s:%u/stream", ip, cfg.rtsp_port);
     ESP_LOGI(TAG, "  Resolucion: %ux%u @ %u fps, %lu kbps", w, h, cfg.fps, (unsigned long)(cfg.bitrate_bps / 1000));
