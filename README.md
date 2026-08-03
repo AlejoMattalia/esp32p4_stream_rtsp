@@ -1,11 +1,46 @@
-ESP-IDF template app
-====================
+# ESP32-P4 RTSP Video Server
 
-This is a template application to be used with [Espressif IoT Development Framework](https://github.com/espressif/esp-idf).
+Servidor RTSP para streaming en vivo desde un ESP32-P4 con cámara OV5647 (CSI + ISP) y encoder H.264 por hardware (V4L2 M2M). Pensado como firmware de validación/desarrollo, no para producción.
 
-Please check [ESP-IDF docs](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for getting started instructions.
+## Archivos principales
 
-*Code in this repository is in the Public Domain (or CC0 licensed, at your option.)
-Unless required by applicable law or agreed to in writing, this
-software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, either express or implied.*
+| Archivo | Rol |
+|---|---|
+| `camera_rtsp.c` / `.h` | Orquesta el pipeline completo: captura CSI (`/dev/video0`), encoder H.264 (`/dev/video11`), y la tarea que empaqueta cada frame codificado en `encoded_frame_t` y lo entrega a `g_encoded_frame_queue`. Expone `cam_rtsp_init/start/stop/deinit`. |
+| `rtsp_server.c` / `.h` | Servidor RTSP: maneja el handshake de control (OPTIONS/DESCRIBE/SETUP/PLAY/TEARDOWN) y arma/envía los paquetes RTP (fragmentación H.264 FU-A por RFC 6184) a partir de los frames que llegan por `g_encoded_frame_queue`. |
+| `wifi_connect.c` / `.h` | Conexión WiFi en modo STA usando el co-procesador remoto (esp-hosted sobre ESP32-C6). Bloquea hasta obtener IP o agotar reintentos; expone `wifi_connect_get_ip_str()` para loguear la IP a usar en ffplay. |
+
+## Dos variantes del servidor (dos branches)
+
+Este proyecto tiene dos formas de transportar el video, en dos branches distintos, para poder comparar comportamiento en distintas condiciones de red:
+
+- **`main`** — `rtsp_server.c` transporta el video **interleaved dentro del mismo socket TCP** de control (`RTP/AVP/TCP`). Más simple, sin problemas de NAT/firewall, pero sufre head-of-line blocking: si se pierde un segmento TCP, el stream se congela hasta la retransmisión.
+- **`rtsp_stream_video_udp`** — `rtsp_server.c` transporta el video por un **socket UDP dedicado** (`RTP/AVP` puro, puerto 6970), negociado en el `SETUP` vía `client_port=`/`server_port=`. Menor latencia y sin freezes por HOL blocking, a cambio de pérdida de paquetes real (visible como corrupción de macroblocks hasta el próximo keyframe). Incluye además un ajuste de `I_PERIOD` en `camera_rtsp.c` (intervalo de keyframe) para reducir el tamaño/frecuencia de las ráfagas de paquetes.
+
+El servidor detecta el modo a través del `Transport:` que manda el cliente en el `SETUP`; en la variante UDP, si el cliente no ofrece `client_port=` (es decir, pide TCP), el server responde `461 Unsupported Transport`.
+
+## Probar con ffplay
+
+Reemplazá `<IP_OBTENIDA>` por la IP que loguea el ESP32-P4 al conectarse (ver `wifi_connect_get_ip_str()`).
+
+### Branch `main` (TCP interleaved)
+
+```bash
+ffplay -fflags nobuffer -flags low_delay -framedrop -strict experimental -rtsp_flags prefer_tcp rtsp://<IP_OBTENIDA>:554/stream
+```
+
+```bash
+ffplay -rtsp_transport tcp -fflags nobuffer -flags low_delay -framedrop rtsp://<IP_OBTENIDA>:554/stream
+```
+
+Cualquiera de los dos comandos sirve; el server siempre fuerza TCP interleaved en esta variante independientemente de lo que pida el cliente.
+
+### Branch `rtsp_stream_video_udp`
+
+```bash
+ffplay -rtsp_transport udp -fflags nobuffer -flags low_delay -framedrop rtsp://<IP_OBTENIDA>:554/stream
+```
+
+`-rtsp_transport udp` es obligatorio acá: el server de este branch solo acepta `SETUP` con `client_port=` (transporte UDP).
+
+En los tres casos, `-fflags nobuffer -flags low_delay -framedrop` minimizan la latencia de reproducción de ffplay (evitan el buffering pensado para VOD y descartan frames si el decode se atrasa, en vez de acumular delay).
