@@ -511,7 +511,7 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
         ctrl[0].id    = V4L2_CID_MPEG_VIDEO_BITRATE;
         ctrl[0].value = s_cfg.bitrate_bps;
         ctrl[1].id    = V4L2_CID_MPEG_VIDEO_H264_I_PERIOD;	// V4L2_CID_MPEG_VIDEO_GOP_SIZE;
-        ctrl[1].value = g_cam_fps / 2; //* 2; // keyframe cada ~2s
+        ctrl[1].value = g_cam_fps * 2; //* 2; // keyframe cada ~2s
         ctrls.ctrl_class = V4L2_CTRL_CLASS_MPEG;
         ctrls.count      = 2;
         ctrls.controls   = ctrl;

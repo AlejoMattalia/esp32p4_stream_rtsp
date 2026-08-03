@@ -41,10 +41,10 @@ extern "C" {
  *
  * Devuelve ESP_OK si quedo conectado, ESP_FAIL en caso contrario.
  */
-esp_err_t wifi_connect_start(void);
+esp_err_t wifi_connect_start (void);
 
 /** Devuelve la IP actual en formato "a.b.c.d", o "0.0.0.0" si no hay link. */
-void wifi_connect_get_ip_str(char *out, size_t out_len);
+void wifi_connect_get_ip_str (char *out, size_t out_len);
 
 #ifdef __cplusplus
 } // extern "C"

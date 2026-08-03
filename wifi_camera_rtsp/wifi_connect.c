@@ -13,6 +13,7 @@
 /******************************************************************************
     Includes
 ******************************************************************************/
+#include <stdlib.h>
 #include <string.h>
 #include "wifi_connect.h"
 #include "esp_wifi.h"
@@ -21,8 +22,8 @@
 #include "esp_netif.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/event_groups.h"
-
 /******************************************************************************
     Defines and constants
 ******************************************************************************/
@@ -40,14 +41,16 @@ static const char *TAG = "[WIFI]";
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
 static esp_netif_t *s_netif = NULL;
+static TaskHandle_t wifi_rssi_hdl;
 /******************************************************************************
     Local function prototypes
 ******************************************************************************/
-static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
+static void event_handler (void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
+static void wifi_rssi_task (void *params);
 /******************************************************************************
     Local function definitions
 ******************************************************************************/
-static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+static void event_handler (void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) 
 	{
@@ -69,12 +72,31 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         ESP_LOGI(TAG, "IP obtenida: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+		
+		xTaskCreate(wifi_rssi_task, "wifi_rssi", 1024, NULL, 10, &wifi_rssi_hdl);
     }
+}
+
+static void wifi_rssi_task (void *params)
+{
+	wifi_ap_record_t ap_info;
+	
+	while(1)
+	{
+		if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) 
+		{
+		    ESP_LOGI(TAG, "RSSI actual: %d dBm", ap_info.rssi);
+		}
+				
+		vTaskDelay(pdMS_TO_TICKS(2000));
+	}
+	
+	vTaskDelete(NULL);
 }
 /******************************************************************************
     Public function definitions
 ******************************************************************************/
-esp_err_t wifi_connect_start(void)
+esp_err_t wifi_connect_start (void)
 {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) 
@@ -105,7 +127,7 @@ esp_err_t wifi_connect_start(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "Conectando a SSID '%s' ...", WIFI_PASSWORD);
+    ESP_LOGI(TAG, "Conectando a SSID '%s' ...", WIFI_SSID);
 
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
                                             WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
@@ -121,7 +143,7 @@ esp_err_t wifi_connect_start(void)
 	return ESP_FAIL;
 }
 
-void wifi_connect_get_ip_str(char *out, size_t out_len)
+void wifi_connect_get_ip_str (char *out, size_t out_len)
 {
     esp_netif_ip_info_t ip_info;
     if (s_netif && esp_netif_get_ip_info(s_netif, &ip_info) == ESP_OK) 
