@@ -1,5 +1,16 @@
 # ESP32-P4 RTSP Video Server
 
+## Publicación en Anny/AWS
+
+1. Crear una placa en `http://3.15.63.191/camera-admin/`.
+2. Completar `main/device_config.h` con Wi-Fi, Camera ID y Device secret.
+3. Compilar y flashear. El firmware publica por RTSP/TCP en MediaMTX mediante
+   `ANNOUNCE`, `SETUP` y `RECORD`, y se reconecta automáticamente.
+4. Vincular la placa desde Anny con el código de activación.
+
+`device_config.h` está versionado por decisión del proyecto. No usar claves de
+producción en repositorios públicos.
+
 Servidor RTSP para streaming en vivo desde un ESP32-P4 con cámara OV5647 (CSI + ISP) y encoder H.264 por hardware (V4L2 M2M). Pensado como firmware de validación/desarrollo, no para producción.
 
 ## Archivos principales

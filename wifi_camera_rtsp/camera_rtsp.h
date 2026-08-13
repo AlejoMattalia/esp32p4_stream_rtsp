@@ -69,6 +69,9 @@ esp_err_t cam_rtsp_deinit(void);
  */
 esp_err_t cam_rtsp_start(void);
 
+/** Arranca solamente captura + encoder, sin servidor RTSP local. */
+esp_err_t cam_rtsp_start_capture(void);
+
 /** Detiene captura, encoding y el servidor RTSP. */
 esp_err_t cam_rtsp_stop(void);
 
@@ -80,4 +83,3 @@ void cam_rtsp_get_dimensions(uint16_t *width, uint16_t *height);
 #endif
 
 #endif // EOF __CAMERA_RTSP_H__
-

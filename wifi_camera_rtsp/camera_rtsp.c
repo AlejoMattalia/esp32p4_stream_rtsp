@@ -551,13 +551,19 @@ esp_err_t cam_rtsp_deinit(void)
 
 esp_err_t cam_rtsp_start(void)
 {
+    ESP_RETURN_ON_ERROR(cam_rtsp_start_capture(), TAG, "no se pudo iniciar captura");
+    return rtsp_server_start(s_cfg.rtsp_port);
+}
+
+esp_err_t cam_rtsp_start_capture(void)
+{
     if (s_running) return ESP_OK;
     s_running = true;
 
     BaseType_t ok = xTaskCreatePinnedToCore(capture_task, "cam_capture", 6144, NULL, 10, &s_capture_task_handle, 1);
     ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "no se pudo crear la tarea de captura");
 
-    return rtsp_server_start(s_cfg.rtsp_port);
+    return ESP_OK;
 }
 
 esp_err_t cam_rtsp_stop(void)
