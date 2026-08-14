@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 
 #include "esp_log.h"
@@ -72,10 +73,18 @@ static int connect_server(void)
     for (struct addrinfo *address = addresses; address; address = address->ai_next) {
         socket_fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
         if (socket_fd < 0) continue;
-        struct timeval timeout = {.tv_sec = 10};
+        struct timeval timeout = {.tv_sec = 3};
         setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-        if (connect(socket_fd, address->ai_addr, address->ai_addrlen) == 0) break;
+        if (connect(socket_fd, address->ai_addr, address->ai_addrlen) == 0) {
+            int enabled = 1;
+            int send_buffer_size = 32 * 1024;
+            setsockopt(socket_fd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
+            setsockopt(socket_fd, SOL_SOCKET, SO_KEEPALIVE, &enabled, sizeof(enabled));
+            setsockopt(socket_fd, SOL_SOCKET, SO_SNDBUF,
+                       &send_buffer_size, sizeof(send_buffer_size));
+            break;
+        }
         close(socket_fd);
         socket_fd = -1;
     }

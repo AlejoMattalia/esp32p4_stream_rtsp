@@ -90,9 +90,11 @@ static mmap_buf_t s_enc_cap_bufs[ENC_CAP_COUNT];
     Local function prototypes
 ******************************************************************************/
 static esp_err_t v4l2_set_fmt(int fd, uint32_t type, uint32_t w, uint32_t h, uint32_t pixfmt);
+static void v4l2_try_set_fps(int fd, uint8_t fps);
 static esp_err_t v4l2_reqbufs_mmap(int fd, uint32_t type, uint32_t count, mmap_buf_t *out_bufs);
 static esp_err_t v4l2_streamon(int fd, uint32_t type);
 static void cache_sps_pps_if_needed(const uint8_t *data, size_t len);
+static bool h264_is_keyframe(const uint8_t *data, size_t len);
 static void format_enumeration(void);
 static void diagnostic_node_video(void);
 static esp_err_t ldo_enable(void);
@@ -127,6 +129,19 @@ static esp_err_t v4l2_set_fmt(int fd, uint32_t type, uint32_t w, uint32_t h, uin
     }
     
 	return ESP_OK;
+}
+
+static void v4l2_try_set_fps(int fd, uint8_t fps)
+{
+    struct v4l2_streamparm parameter = {0};
+    parameter.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    parameter.parm.capture.timeperframe.numerator = 1;
+    parameter.parm.capture.timeperframe.denominator = fps;
+    if (ioctl(fd, VIDIOC_S_PARM, &parameter) != 0) {
+        ESP_LOGW(TAG, "El driver no permitio fijar %u FPS (%s)", fps, strerror(errno));
+    } else {
+        ESP_LOGI(TAG, "Captura configurada a %u FPS", fps);
+    }
 }
 
 static esp_err_t v4l2_reqbufs_mmap(int fd, uint32_t type, uint32_t count, mmap_buf_t *out_bufs)
@@ -235,6 +250,24 @@ static void cache_sps_pps_if_needed(const uint8_t *data, size_t len)
     xSemaphoreGive(g_sps_pps_cache.lock);
 }
 
+static bool h264_is_keyframe(const uint8_t *data, size_t len)
+{
+    for (size_t i = 0; i + 4 < len; i++) {
+        size_t start_code_len = 0;
+        if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1) {
+            start_code_len = 3;
+        } else if (data[i] == 0 && data[i + 1] == 0 &&
+                   data[i + 2] == 0 && data[i + 3] == 1) {
+            start_code_len = 4;
+        }
+        if (start_code_len && i + start_code_len < len &&
+            (data[i + start_code_len] & 0x1F) == 5) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void format_enumeration(void)
 {
 	ESP_LOGI(TAG, "================ ENUMERANDO FORMATOS/RESOLUCIONES DE /dev/video0 ================");
@@ -314,6 +347,7 @@ static void capture_task(void *arg)
 
 	uint32_t rtp_ts = 0;
     int64_t t_stream_start_us = esp_timer_get_time();
+	bool wait_for_keyframe = false;
 	
 	// static uint32_t s_enc_out_idx = 0;
     ESP_LOGI(TAG, "Tarea de captura/encoding iniciada (%ux%u @ %u fps, %lu bps)", g_cam_width, g_cam_height, g_cam_fps, (unsigned long)s_cfg.bitrate_bps);
@@ -355,6 +389,15 @@ static void capture_task(void *arg)
             uint8_t *src = (uint8_t *)s_enc_cap_bufs[enc_cap.index].start;
             size_t len = enc_cap.bytesused;
             cache_sps_pps_if_needed(src, len);
+            bool is_keyframe = h264_is_keyframe(src, len);
+
+            if (wait_for_keyframe && !is_keyframe) {
+                ioctl(s_h264_fd, VIDIOC_QBUF, &enc_cap);
+                goto reclaim_encoder_input;
+            }
+            if (is_keyframe) {
+                wait_for_keyframe = false;
+            }
 
             encoded_frame_t *frame = heap_caps_malloc(sizeof(encoded_frame_t), MALLOC_CAP_DEFAULT);
             if (frame) 
@@ -369,17 +412,21 @@ static void capture_task(void *arg)
                 {
                     memcpy(frame->data, src, len);
                     frame->len = len;
+                    frame->is_keyframe = is_keyframe;
                     frame->rtp_timestamp = rtp_ts;
 
                     if (xQueueSend(g_encoded_frame_queue, &frame, 0) != pdTRUE) 
                     {
                         encoded_frame_t *old = NULL;
-                        if (xQueueReceive(g_encoded_frame_queue, &old, 0) == pdTRUE)
-                        {
+                        while (xQueueReceive(g_encoded_frame_queue, &old, 0) == pdTRUE) {
                             encoded_frame_free(old);
                         }
-						
-                        xQueueSend(g_encoded_frame_queue, &frame, 0);
+                        if (is_keyframe) {
+                            xQueueSend(g_encoded_frame_queue, &frame, 0);
+                        } else {
+                            encoded_frame_free(frame);
+                            wait_for_keyframe = true;
+                        }
                     }
                 } else 
                 {
@@ -395,6 +442,8 @@ static void capture_task(void *arg)
         }
 
         // 4) Reclamar el buffer USERPTR consumido por el encoder
+reclaim_encoder_input:
+        ;
         struct v4l2_buffer enc_out_done = { 0 };
         enc_out_done.type   = V4L2_BUF_TYPE_VIDEO_OUTPUT;
         enc_out_done.memory = V4L2_MEMORY_USERPTR;
@@ -455,7 +504,7 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
 	g_cam_fps = cfg->fps ? cfg->fps : 20;
     g_sps_pps_cache.lock = xSemaphoreCreateMutex();
     g_sps_pps_cache.valid = false;
-	g_encoded_frame_queue = xQueueCreate(1, sizeof(encoded_frame_t *));
+	g_encoded_frame_queue = xQueueCreate(3, sizeof(encoded_frame_t *));
 	ESP_RETURN_ON_FALSE(g_encoded_frame_queue && g_sps_pps_cache.lock, ESP_ERR_NO_MEM, TAG, "no se pudieron crear cola/mutex");
 
     esp_video_init_csi_config_t csi_cfg = 
@@ -494,6 +543,7 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
 	format_enumeration();
 							 
 	ESP_RETURN_ON_ERROR(v4l2_set_fmt(s_video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE, g_cam_width, g_cam_height, V4L2_PIX_FMT_YUV420), TAG, "set fmt camara fallo");
+    v4l2_try_set_fps(s_video_fd, g_cam_fps);
     ESP_RETURN_ON_ERROR(v4l2_reqbufs_mmap(s_video_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE, CAP_BUF_COUNT, s_cap_bufs), TAG, "reqbufs camara fallo");
 
 	diagnostic_node_video();
@@ -511,7 +561,7 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
         ctrl[0].id    = V4L2_CID_MPEG_VIDEO_BITRATE;
         ctrl[0].value = s_cfg.bitrate_bps;
         ctrl[1].id    = V4L2_CID_MPEG_VIDEO_H264_I_PERIOD;	// V4L2_CID_MPEG_VIDEO_GOP_SIZE;
-        ctrl[1].value = g_cam_fps / 2; //* 2; // keyframe cada ~2s
+        ctrl[1].value = g_cam_fps; // keyframe cada ~1 segundo
         ctrls.ctrl_class = V4L2_CTRL_CLASS_MPEG;
         ctrls.count      = 2;
         ctrls.controls   = ctrl;
