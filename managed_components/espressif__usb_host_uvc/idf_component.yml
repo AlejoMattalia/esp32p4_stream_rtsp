@@ -13,7 +13,7 @@ files:
   - host_test
 repository: git://github.com/espressif/esp-usb.git
 repository_info:
-  commit_sha: 27565ee79bbe0da992964cbddf33b2a2416def67
+  commit_sha: ded06ef7eb5a63388fa5c7253d08e3fe2e29f793
   path: host/class/uvc/usb_host_uvc
 targets:
 - esp32s2
@@ -23,4 +23,4 @@ targets:
 - esp32s31
 - linux
 url: https://github.com/espressif/esp-usb/tree/master/host/class/uvc/usb_host_uvc
-version: 2.5.0
+version: 2.5.1

@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "esp_private/critical_section.h"
 #include "esp_err.h"
+#include "esp_check.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "hcd.h"
@@ -23,6 +24,7 @@
 #define EP_NUM_MIN                  1   // The smallest possible non-default endpoint number
 #define EP_NUM_MAX                  16  // The largest possible non-default endpoint number
 #define NUM_NON_DEFAULT_EP          ((EP_NUM_MAX - 1) * 2)  // The total number of non-default endpoints a device can have.
+#define USBH_MAX_SYNC_DEVS_HANDLED  16  // Maximum number of devices handled synchronously
 
 // Device action flags. LISTED IN THE ORDER THEY SHOULD BE HANDLED IN within usbh_process(). Some actions are mutually exclusive
 typedef enum {
@@ -31,12 +33,13 @@ typedef enum {
     DEV_ACTION_EP0_DEQUEUE          = (1 << 2),     // Dequeue all URBs from EP0
     DEV_ACTION_EP0_CLEAR            = (1 << 3),     // Move EP0 to the the active state
     DEV_ACTION_PROP_GONE_EVT        = (1 << 4),     // Propagate a USBH_EVENT_DEV_GONE event
-    DEV_ACTION_FREE                 = (1 << 5),     // Free the device object
-    DEV_ACTION_PROP_NEW_DEV         = (1 << 6),     // Propagate a USBH_EVENT_NEW_DEV event
-    DEV_ACTION_EPn_CLEAR            = (1 << 7),     // Move all non-default endpoints to active state
-    DEV_ACTION_PROP_SUSPEND_EVT     = (1 << 8),     // Propagate USBH_EVENT_DEV_SUSPEND event
-    DEV_ACTION_PROP_RESUME_EVT      = (1 << 9),     // Propagate USBH_EVENT_DEV_RESUME event
-    DEV_ACTION_PROP_ALL_IDLE_EVT    = (1 << 10),    // Propagate USBH_EVENT_ALL_IDLE event
+    DEV_ACTION_PROP_REMOVED_EVT     = (1 << 5),     // Propagate a USBH_EVENT_DEV_REMOVED event
+    DEV_ACTION_FREE                 = (1 << 6),     // Free the device object
+    DEV_ACTION_PROP_NEW_DEV         = (1 << 7),     // Propagate a USBH_EVENT_NEW_DEV event
+    DEV_ACTION_EPn_CLEAR            = (1 << 8),     // Move all non-default endpoints to active state
+    DEV_ACTION_PROP_SUSPEND_EVT     = (1 << 9),     // Propagate USBH_EVENT_DEV_SUSPEND event
+    DEV_ACTION_PROP_RESUME_EVT      = (1 << 10),    // Propagate USBH_EVENT_DEV_RESUME event
+    DEV_ACTION_PROP_ALL_IDLE_EVT    = (1 << 11),    // Propagate USBH_EVENT_ALL_IDLE event
 } dev_action_t;
 
 typedef struct device_s device_t;
@@ -525,10 +528,19 @@ static bool _dev_set_actions(device_t *dev_obj, uint32_t action_flags)
     return call_proc_req_cb;
 }
 
-static inline void handle_epn_halt_flush(device_t *dev_obj)
+/**
+ * @brief Halt and flush non-default endpoints of a device with the mutex already acquired
+ * @note The caller is responsible for acquiring the mutex
+ * @note This function is used for a batch update of all devices's EPs, acquiring mutex only once
+ *
+ * @param[in] dev_obj Pointer to the device object
+ */
+static inline void handle_epn_halt_flush_locked(device_t *dev_obj)
 {
-    // We need to take the mux_lock to access mux_protected members
-    xSemaphoreTake(p_usbh_obj->constant.mux_lock, portMAX_DELAY);
+    /*
+    CALLER OF THE FUNCTION IS RESPONSIBLE FOR ACQUIRING MUTEX
+    */
+
     // Halt then flush all non-default EPs
     for (int i = 0; i < NUM_NON_DEFAULT_EP; i++) {
         if (dev_obj->mux_protected.endpoints[i] != NULL) {
@@ -537,13 +549,35 @@ static inline void handle_epn_halt_flush(device_t *dev_obj)
             ESP_ERROR_CHECK(hcd_pipe_command(dev_obj->mux_protected.endpoints[i]->constant.pipe_hdl, HCD_PIPE_CMD_FLUSH));
         }
     }
-    xSemaphoreGive(p_usbh_obj->constant.mux_lock);
 }
 
-static inline void handle_epn_clear(device_t *dev_obj)
+/**
+ * @brief Halt and flush non-default endpoints of a device
+ * @note The function is responsible for acquiring the mutex
+ *
+ * @param[in] dev_obj Pointer to the device object
+ */
+static inline void handle_epn_halt_flush(device_t *dev_obj)
 {
     // We need to take the mux_lock to access mux_protected members
     xSemaphoreTake(p_usbh_obj->constant.mux_lock, portMAX_DELAY);
+    handle_epn_halt_flush_locked(dev_obj);
+    xSemaphoreGive(p_usbh_obj->constant.mux_lock);
+}
+
+/**
+ * @brief Clear non-default endpoints of a device with the mutex already acquired
+ * @note The caller is responsible for acquiring the mutex
+ * @note This function is used for a batch update of all devices's EPs, acquiring mutex only once
+ *
+ * @param[in] dev_obj Pointer to the device object
+ */
+static inline void handle_epn_clear_locked(device_t *dev_obj)
+{
+    /*
+    CALLER OF THE FUNCTION IS RESPONSIBLE FOR ACQUIRING MUTEX
+    */
+
     // Resume all non-default EPs
     for (int i = 0; i < NUM_NON_DEFAULT_EP; i++) {
         if (dev_obj->mux_protected.endpoints[i] != NULL) {
@@ -551,9 +585,27 @@ static inline void handle_epn_clear(device_t *dev_obj)
             hcd_pipe_command(dev_obj->mux_protected.endpoints[i]->constant.pipe_hdl, HCD_PIPE_CMD_CLEAR);
         }
     }
+}
+
+/**
+ * @brief Clear non-default endpoints of a device
+ * @note The function is responsible for acquiring the mutex
+ *
+ * @param[in] dev_obj Pointer to the device object
+ */
+static inline void handle_epn_clear(device_t *dev_obj)
+{
+    // We need to take the mux_lock to access mux_protected members
+    xSemaphoreTake(p_usbh_obj->constant.mux_lock, portMAX_DELAY);
+    handle_epn_clear_locked(dev_obj);
     xSemaphoreGive(p_usbh_obj->constant.mux_lock);
 }
 
+/**
+ * @brief Halt and flush the default endpoint of a device
+ *
+ * @param[in] dev_obj Pointer to the device object
+ */
 static inline void handle_ep0_flush(device_t *dev_obj)
 {
     ESP_LOGD(USBH_TAG, "EP0 halt flush");
@@ -600,6 +652,19 @@ static inline void handle_prop_gone_evt(device_t *dev_obj)
         .dev_gone_data = {
             .dev_addr = dev_obj->constant.address,
             .dev_hdl = (usb_device_handle_t)dev_obj,
+        },
+    };
+    p_usbh_obj->constant.event_cb(&event_data, p_usbh_obj->constant.event_cb_arg);
+}
+
+static inline void handle_prop_removed_event(device_t *dev_obj)
+{
+    // Only stable identifiers are propagated because the device object may be freed immediately afterwards.
+    ESP_LOGD(USBH_TAG, "Device %d removed", dev_obj->constant.address);
+    usbh_event_data_t event_data = {
+        .event = USBH_EVENT_DEV_REMOVED,
+        .dev_removed_data = {
+            .dev_addr = dev_obj->constant.address,
         },
     };
     p_usbh_obj->constant.event_cb(&event_data, p_usbh_obj->constant.event_cb_arg);
@@ -815,6 +880,9 @@ esp_err_t usbh_process(void)
         if (action_flags & DEV_ACTION_PROP_GONE_EVT) {
             handle_prop_gone_evt(dev_obj);
         }
+        if (action_flags & DEV_ACTION_PROP_REMOVED_EVT) {
+            handle_prop_removed_event(dev_obj);
+        }
         if (action_flags & DEV_ACTION_EPn_CLEAR) {
             handle_epn_clear(dev_obj);
         }
@@ -879,16 +947,15 @@ esp_err_t usbh_devs_addr_list_fill(int list_len, uint8_t *dev_addr_list, int *nu
     USBH_ENTER_CRITICAL();
     /*
     Fill list with devices from idle tailq and pending tailq. Only devices that
-    are fully enumerated are added to the list. Thus, the following devices are
-    not excluded:
+    are fully enumerated are added to the list. Thus, the following devices are excluded:
     - Devices with their enum_lock set
-    - Devices not in the configured state
+    - Devices not in the configured or suspended state
     - Devices with address 0
     */
     TAILQ_FOREACH(dev_obj, &p_usbh_obj->dynamic.devs_idle_tailq, dynamic.tailq_entry) {
         if (num_filled < list_len) {
             if (!dev_obj->dynamic.flags.enum_lock &&
-                    dev_obj->dynamic.state == USB_DEVICE_STATE_CONFIGURED &&
+                    (dev_obj->dynamic.state == USB_DEVICE_STATE_CONFIGURED || dev_obj->dynamic.state == USB_DEVICE_STATE_SUSPENDED) &&
                     dev_obj->constant.address != 0) {
                 dev_addr_list[num_filled] = dev_obj->constant.address;
                 num_filled++;
@@ -902,7 +969,7 @@ esp_err_t usbh_devs_addr_list_fill(int list_len, uint8_t *dev_addr_list, int *nu
     TAILQ_FOREACH(dev_obj, &p_usbh_obj->dynamic.devs_pending_tailq, dynamic.tailq_entry) {
         if (num_filled < list_len) {
             if (!dev_obj->dynamic.flags.enum_lock &&
-                    dev_obj->dynamic.state == USB_DEVICE_STATE_CONFIGURED &&
+                    (dev_obj->dynamic.state == USB_DEVICE_STATE_CONFIGURED || dev_obj->dynamic.state == USB_DEVICE_STATE_SUSPENDED) &&
                     dev_obj->constant.address != 0) {
                 dev_addr_list[num_filled] = dev_obj->constant.address;
                 num_filled++;
@@ -979,8 +1046,8 @@ esp_err_t usbh_devs_remove(unsigned int uid)
     dev_obj->dynamic.flags.is_gone = 1;
     // Check if the device can be freed immediately
     if (dev_obj->dynamic.open_count == 0) {
-        // Device is not currently opened at all. Can free immediately.
-        call_proc_req_cb = _dev_set_actions(dev_obj, DEV_ACTION_FREE);
+        // Device is not currently opened at all. Notify subscribed monitors, then free immediately.
+        call_proc_req_cb = _dev_set_actions(dev_obj, DEV_ACTION_PROP_REMOVED_EVT | DEV_ACTION_FREE);
     } else {
         // Device is still opened. Flush endpoints and propagate device gone event
         call_proc_req_cb = _dev_set_actions(dev_obj,
@@ -1064,6 +1131,45 @@ esp_err_t usbh_devs_mark_all_free(void)
     return (wait_for_free) ? ESP_ERR_NOT_FINISHED : ESP_OK;
 }
 
+#ifdef AUTO_PM_LIGHT_SLEEP
+
+esp_err_t usbh_devs_halt_flush_all_sync(void)
+{
+    esp_err_t ret;
+    USBH_CHECK(p_usbh_obj != NULL, ESP_ERR_INVALID_STATE);
+
+    // Try to acquire mutex, if busy, bail the auto supend in favour of low latency to enter the light sleep
+    if (xSemaphoreTake(p_usbh_obj->constant.mux_lock, 0) != pdTRUE) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+
+    ESP_GOTO_ON_FALSE(p_usbh_obj->mux_protected.num_device <= USBH_MAX_SYNC_DEVS_HANDLED, ESP_ERR_INVALID_SIZE,
+                      unlock, USBH_TAG, "Too many devices for synchronous handling");
+
+    int devs_count = 0;
+    device_t *devs_list[USBH_MAX_SYNC_DEVS_HANDLED];
+    device_t *current_dev;
+    USBH_ENTER_CRITICAL();
+    TAILQ_FOREACH(current_dev, &p_usbh_obj->dynamic.devs_pending_tailq, dynamic.tailq_entry) {
+        devs_list[devs_count++] = current_dev;
+    }
+    TAILQ_FOREACH(current_dev, &p_usbh_obj->dynamic.devs_idle_tailq, dynamic.tailq_entry) {
+        devs_list[devs_count++] = current_dev;
+    }
+    USBH_EXIT_CRITICAL();
+
+    for (int i = 0; i < devs_count; i++) {
+        handle_epn_halt_flush_locked(devs_list[i]);
+        handle_ep0_flush(devs_list[i]);
+    }
+    ret = ESP_OK;
+
+unlock:
+    xSemaphoreGive(p_usbh_obj->constant.mux_lock);
+    return ret;
+}
+#endif // AUTO_PM_LIGHT_SLEEP
+
 void usbh_devs_set_pm_actions_all(usbh_dev_ctrl_t device_ctrl)
 {
     // Decode the device_ctrl to dev_actions flags
@@ -1107,7 +1213,8 @@ void usbh_devs_set_pm_actions_all(usbh_dev_ctrl_t device_ctrl)
                 // Change device state to suspended and backup the current device state for resuming
                 dev_obj_cur->dynamic.last_state = dev_obj_cur->dynamic.state;
                 dev_obj_cur->dynamic.state = USB_DEVICE_STATE_SUSPENDED;
-            } else if (device_ctrl & USBH_DEV_RESUME_EVT) {
+            }
+            if (device_ctrl & USBH_DEV_RESUME_EVT) {
                 // Set the device state, to the state in which it was before suspending
                 dev_obj_cur->dynamic.state = dev_obj_cur->dynamic.last_state;
             }

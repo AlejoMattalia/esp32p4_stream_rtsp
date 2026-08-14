@@ -24,6 +24,7 @@ typedef struct {
           /* Thread */
 /* 11 */   void*  (*_h_thread_create)(const char *tname, uint32_t tprio, uint32_t tstack_size, void (*start_routine)(void const *), void *sr_arg);
 /* 12 */   int    (*_h_thread_cancel)(void *thread_handle);
+           void   (*_h_thread_yield)(void);
 
           /* Sleeps */
 /* 13 */  unsigned int (*_h_msleep)(unsigned int mseconds);
@@ -44,14 +45,14 @@ typedef struct {
           /* Mutex */
 /* 23 */  int    (*_h_unlock_mutex)(void * mutex_handle);
 /* 24 */  void*  (*_h_create_mutex)(void);
-/* 25 */  int    (*_h_lock_mutex)(void * mutex_handle, int timeout);
+/* 25 */  int    (*_h_lock_mutex)(void * mutex_handle, int timeout_ms);
 /* 26 */  int    (*_h_destroy_mutex)(void * mutex_handle);
 
           /* Semaphore */
 /* 27 */  int    (*_h_post_semaphore)(void * semaphore_handle);
 /* 28 */  int    (*_h_post_semaphore_from_isr)(void * semaphore_handle);
 /* 29 */  void*  (*_h_create_semaphore)(int maxCount);
-/* 30 */  int    (*_h_get_semaphore)(void * semaphore_handle, int timeout);
+/* 30 */  int    (*_h_get_semaphore)(void * semaphore_handle, int timeout_ms);
 /* 31 */  int    (*_h_destroy_semaphore)(void * semaphore_handle);
 
           /* Timer */
@@ -80,15 +81,12 @@ typedef struct {
 /* 41 */ void * (*_h_bus_init)(void);
 /* 42 */ int (*_h_bus_deinit)(void*);
           /* Transport - SPI */
-#if H_TRANSPORT_IN_USE == H_TRANSPORT_SPI
 /* 43 */ int (*_h_do_bus_transfer)(void *transfer_context);
-#endif
 /* 44 */ int (*_h_event_wifi_post)(int32_t event_id, void* event_data, size_t event_data_size, uint32_t ticks_to_wait);
 // 45 - int (*_h_event_ip_post)(int32_t event_id, void* event_data, size_t event_data_size, uint32_t ticks_to_wait);
 /* 45 */ void (*_h_printf)(int level, const char *tag, const char *format, ...);
 /* 46 */ void (*_h_hosted_init_hook)(void);
 
-#if H_TRANSPORT_IN_USE == H_TRANSPORT_SDIO
           /* Transport - SDIO */
 /* 47 */ int (*_h_sdio_card_init)(void *ctx, bool show_config);
 /* 48 */ int (*_h_sdio_card_deinit)(void*ctx);
@@ -97,9 +95,7 @@ typedef struct {
 /* 51 */ int (*_h_sdio_read_block)(void *ctx, uint32_t reg, uint8_t *data, uint16_t size, bool lock_required);
 /* 52 */ int (*_h_sdio_write_block)(void *ctx, uint32_t reg, uint8_t *data, uint16_t size, bool lock_required);
 /* 53 */ int (*_h_sdio_wait_slave_intr)(void *ctx, uint32_t ticks_to_wait);
-#endif
 
-#if H_TRANSPORT_IN_USE == H_TRANSPORT_SPI_HD
           /* Transport - SPI HD */
 /* 54 */ int (*_h_spi_hd_read_reg)(uint32_t reg, uint32_t *data, int poll, bool lock_required);
 /* 55 */ int (*_h_spi_hd_write_reg)(uint32_t reg, uint32_t *data, bool lock_required);
@@ -107,14 +103,11 @@ typedef struct {
 /* 57 */ int (*_h_spi_hd_write_dma)(uint8_t *data, uint16_t size, bool lock_required);
 /* 58 */ int (*_h_spi_hd_set_data_lines)(uint32_t data_lines);
 /* 59 */ int (*_h_spi_hd_send_cmd9)(void);
-#endif
 
-#if H_TRANSPORT_IN_USE == H_TRANSPORT_UART
           /* Transport - UART */
 /* 60 */ int (*_h_uart_read)(void *ctx, uint8_t *data, uint16_t size);
 /* 61 */ int (*_h_uart_write)(void *ctx, uint8_t *data, uint16_t size);
 /* 62 */ int (*_h_uart_flush_input)(void *ctx);
-#endif
 
 /* 63 */ int (*_h_restart_host)(void);
 

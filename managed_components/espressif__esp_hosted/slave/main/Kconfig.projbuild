@@ -50,6 +50,10 @@ menu "Example Configuration"
 			bool "ESP32-P4-Function-EV-Board"
 			depends on IDF_TARGET_ESP32C6
 
+		config ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
+			bool "ESP32-P4X-C5-Function-EV-Board"
+			depends on IDF_TARGET_ESP32C5
+
 		config C2_C5_MODULE_SUB_BOARD
 			bool "ESP32-P4 EV Sub-Board for C2 & C5"
 			depends on IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C5
@@ -168,6 +172,7 @@ menu "Example Configuration"
 					default 20 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 20 if ESP32P4_EYE_C6_BOARD
 					default 27 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 8 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 13 if IDF_TARGET_ESP32
 					default 11 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
 					default 5 if IDF_TARGET_ESP32H2
@@ -183,6 +188,7 @@ menu "Example Configuration"
 					default 21 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 21 if ESP32P4_EYE_C6_BOARD
 					default 28 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 7 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 12 if IDF_TARGET_ESP32
 					default 13 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
 					default 0 if IDF_TARGET_ESP32H2
@@ -198,6 +204,7 @@ menu "Example Configuration"
 					default 19 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 19 if ESP32P4_EYE_C6_BOARD
 					default 26 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 9 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 3 if IDF_TARGET_ESP32C5
 					default 0 if IDF_TARGET_ESP32C2 && C2_C5_MODULE_SUB_BOARD
 					default 14 if IDF_TARGET_ESP32
@@ -215,6 +222,7 @@ menu "Example Configuration"
 					default 18 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 18 if ESP32P4_EYE_C6_BOARD
 					default 25 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 10 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 15 if IDF_TARGET_ESP32
 					default 10 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
 					default 8 if IDF_TARGET_ESP32C61
@@ -278,6 +286,7 @@ menu "Example Configuration"
 					default 22 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 22 if ESP32P4_EYE_C6_BOARD
 					default 22 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 14 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 4 if IDF_TARGET_ESP32C2 && C2_C5_MODULE_SUB_BOARD
 					default 3 if IDF_TARGET_ESP32C2 && !C2_C5_MODULE_SUB_BOARD
 					default 4 if IDF_TARGET_ESP32C5 && C2_C5_MODULE_SUB_BOARD
@@ -297,6 +306,7 @@ menu "Example Configuration"
 					default 23 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 23 if ESP32P4_EYE_C6_BOARD
 					default 23 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 13 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 1 if IDF_TARGET_ESP32C2 && C2_C5_MODULE_SUB_BOARD
 					default 4 if IDF_TARGET_ESP32C2 && !C2_C5_MODULE_SUB_BOARD
 					default 0 if IDF_TARGET_ESP32C5 && C2_C5_MODULE_SUB_BOARD
@@ -524,12 +534,21 @@ menu "Example Configuration"
 
 				config ESP_SPI_HD_PRIV_INTERFACE_2_DATA_LINES
 					bool "2 data lines"
+
+				config ESP_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
+					depends on $(ESP_IDF_VERSION) >= "6.1"
+					bool "1 data line"
 			endchoice
+
+			### SPI-HD 1-bit mode not compatible with 2/4-bit modes
+			comment "Make sure host is also configured for 1 data line or SPI-HD transport will not work"
+				depends on ESP_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
 
 			config ESP_SPI_HD_INTERFACE_NUM_DATA_LINES
 				int
 				default 4 if ESP_SPI_HD_PRIV_INTERFACE_4_DATA_LINES
 				default 2 if ESP_SPI_HD_PRIV_INTERFACE_2_DATA_LINES
+				default 1 if ESP_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
 
 			menu "GPIOs"
 
@@ -540,6 +559,7 @@ menu "Example Configuration"
 					default 18 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 18 if ESP32P4_EYE_C6_BOARD
 					default 25 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 10 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 8 if IDF_TARGET_ESP32C61
 					default 10
 					help
@@ -552,6 +572,7 @@ menu "Example Configuration"
 					default 19 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 19 if ESP32P4_EYE_C6_BOARD
 					default 26 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 9 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 3 if IDF_TARGET_ESP32C5
 					default 0 if IDF_TARGET_ESP32C2
 					default 6
@@ -565,17 +586,20 @@ menu "Example Configuration"
 					default 20 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 20 if ESP32P4_EYE_C6_BOARD
 					default 27 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 8 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 7
 					help
 						SPI HD controller Host D0
 
 				config ESP_SPI_HD_GPIO_D1
+					depends on !ESP_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
 					int "Slave GPIO pin for Host D1"
 					default 21 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD
 					default 7 if ESP_HOST_DEV_BOARD_P4_C5_CORE
 					default 21 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 21 if ESP32P4_EYE_C6_BOARD
 					default 28 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 7 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 2
 					help
 						SPI HD controller Host D1
@@ -588,6 +612,7 @@ menu "Example Configuration"
 					default 22 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 22 if ESP32P4_EYE_C6_BOARD
 					default 22 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 14 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 4 if IDF_TARGET_ESP32C61
 					default 5
 					help
@@ -601,18 +626,29 @@ menu "Example Configuration"
 					default 23 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 23 if ESP32P4_EYE_C6_BOARD
 					default 23 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 13 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 3 if IDF_TARGET_ESP32C61
 					default 4
 					help
 						SPI HD controller Host D3
 
+			config ESP_SPI_HD_DATA_READY_ENABLED
+				bool "Use DATA_READY GPIO"
+				default y
+				help
+					Enable to use a dedicated GPIO for signaling host that slave has
+					data to be read. Disable to save one GPIO pin — host will poll the
+					TX_BUF_LEN register instead (adds ~1-5 ms latency).
+
 				config ESP_SPI_HD_GPIO_DATA_READY
+					depends on ESP_SPI_HD_DATA_READY_ENABLED
 					int "Slave GPIO pin for Data Ready"
 					default 2 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD
 					default 28 if ESP_HOST_DEV_BOARD_P4_C5_CORE
 					default 9 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 9 if ESP_HOST_DEV_BOARD_P4_C61_CORE
 					default 9 if ESP32P4_EYE_C6_BOARD
+					default 2 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 0 if IDF_TARGET_ESP32C5
 					default 1 if IDF_TARGET_ESP32C2
 					default 23 if IDF_TARGET_ESP32C61
@@ -621,6 +657,7 @@ menu "Example Configuration"
 						Slave GPIO pin for indicating host that SPI slave has data to be read by host
 
 				choice ESP_SPI_HD_DATAREADY_GPIO_CONFIG
+					depends on ESP_SPI_HD_DATA_READY_ENABLED
 					bool "DataReady GPIO Config"
 					default ESP_DR_ACTIVE_HIGH
 					help
@@ -673,6 +710,7 @@ menu "Example Configuration"
 
 			config ESP_UART_PIN_TX
 				int "TX GPIO number"
+				default 7 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 				default 13 if IDF_TARGET_ESP32
 				default 5 if IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C3
 				default 14 if IDF_TARGET_ESP32C5
@@ -689,6 +727,7 @@ menu "Example Configuration"
 
 			config ESP_UART_PIN_RX
 				int "RX GPIO number"
+				default 8 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 				default 12 if IDF_TARGET_ESP32
 				default 4 if IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C3
 				default 13 if IDF_TARGET_ESP32C5
@@ -711,12 +750,31 @@ menu "Example Configuration"
 					Baud Rate to Use. Make sure Hardware supports the rate.
 					Standard rates are 9600, 19200, 38400, 57600, 115200, 460800, 921600
 
-			config ESP_UART_NUM_DATA_BITS
-				int "Number of Data Bits"
-				default 8
-				range 5 8
+			choice ESP_UART_PRIV_NUM_DATA_BITS
+				bool "Number of Data Bits"
+				default ESP_UART_PRIV_NUM_DATA_BITS_8
 				help
 					Number of Data Bits to use
+
+				config ESP_UART_PRIV_NUM_DATA_BITS_5
+					bool "5 Bits"
+
+				config ESP_UART_PRIV_NUM_DATA_BITS_6
+					bool "6 Bits"
+
+				config ESP_UART_PRIV_NUM_DATA_BITS_7
+					bool "7 Bits"
+
+				config ESP_UART_PRIV_NUM_DATA_BITS_8
+					bool "8 Bits"
+			endchoice
+
+			config ESP_UART_NUM_DATA_BITS
+				int
+				default 0 if ESP_UART_PRIV_NUM_DATA_BITS_5
+				default 1 if ESP_UART_PRIV_NUM_DATA_BITS_6
+				default 2 if ESP_UART_PRIV_NUM_DATA_BITS_7
+				default 3 if ESP_UART_PRIV_NUM_DATA_BITS_8
 
 			choice ESP_UART_PRIV_PARITY
 				bool "Parity"
@@ -734,8 +792,8 @@ menu "Example Configuration"
 			config ESP_UART_PARITY
 				int
 				default 0 if ESP_UART_PRIV_PARITY_NONE
-				default 1 if ESP_UART_PRIV_PARITY_EVEN
-				default 2 if ESP_UART_PRIV_PARITY_ODD
+				default 2 if ESP_UART_PRIV_PARITY_EVEN
+				default 3 if ESP_UART_PRIV_PARITY_ODD
 
 			choice ESP_UART_PRIV_STOP_BITS
 				bool "Number of Stop Bits"
@@ -752,9 +810,9 @@ menu "Example Configuration"
 
 			config ESP_UART_STOP_BITS
 				int
-				default 0 if ESP_UART_PRIV_STOP_BITS_1
-				default 1 if ESP_UART_PRIV_STOP_BITS_1_5
-				default 2 if ESP_UART_PRIV_STOP_BITS_2
+				default 1 if ESP_UART_PRIV_STOP_BITS_1
+				default 2 if ESP_UART_PRIV_STOP_BITS_1_5
+				default 3 if ESP_UART_PRIV_STOP_BITS_2
 
 			config ESP_UART_GPIO_RESET
 				int "Slave GPIO pin to reset itself"
@@ -965,7 +1023,7 @@ menu "Example Configuration"
 		help
 			Default task priority of ESP-Hosted tasks
 
-	config ESP_CACHE_MALLOC
+	config ESP_HOSTED_USE_MEMPOOL
 		bool "Enable Mempool"
 		default y
 		help
@@ -1000,6 +1058,19 @@ menu "Example Configuration"
 		default n
 		help
 			Enable Wi-Fi Easy Connect (DPP) support
+
+	menuconfig ESP_HOSTED_OT_RCP_ENABLED
+		depends on OPENTHREAD_ENABLED
+		bool "Enable OpenThread RCP (Radio Co-Processor)"
+		default n
+		help
+			"Enable OpenThread RCP (Radio Co-Processor) support"
+
+	if ESP_HOSTED_OT_RCP_ENABLED
+
+	   rsource "./Kconfig.openthread"
+
+	endif
 
 	config ESP_HOSTED_ALLOW_FULL_APP_DESC
 		bool "Return the Full App Descriptor"
@@ -1259,6 +1330,8 @@ menu "Example Configuration"
 				int
 				default 2 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD && !ESP_SPI_HD_HOST_INTERFACE
 				default 9 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD && ESP_SPI_HD_HOST_INTERFACE
+				default 2 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD && !ESP_SPI_HD_HOST_INTERFACE
+				default 28 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD && ESP_SPI_HD_HOST_INTERFACE
 				default 3 if ESP_HOST_DEV_BOARD_P4_C5_CORE
 				default 6 if C2_C5_MODULE_SUB_BOARD && IDF_TARGET_ESP32C2
 				default -1
@@ -1267,6 +1340,8 @@ menu "Example Configuration"
 				int
 				default 2 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD && !ESP_SPI_HD_HOST_INTERFACE
 				default 9 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD && ESP_SPI_HD_HOST_INTERFACE
+				default 2 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD && !ESP_SPI_HD_HOST_INTERFACE
+				default 28 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD && ESP_SPI_HD_HOST_INTERFACE
 				default 3 if ESP_HOST_DEV_BOARD_P4_C5_CORE
 				default 6 if C2_C5_MODULE_SUB_BOARD && IDF_TARGET_ESP32C2
 				default 100
@@ -1384,20 +1459,24 @@ endif
 
 	config ESP_HOSTED_CP_EXT_COEX
 		bool "External Coexistence support (Host controls slave external co-ex)"
-		select ESP_COEX_EXTERNAL_COEXIST_ENABLE if !(BT_ENABLED || NIMBLE_ENABLED) && !IDF_TARGET_ESP32 && ESP_COEX_ENABLED
+		select ESP_COEX_EXTERNAL_COEXIST_ENABLE if ((!BT_CONTROLLER_ENABLED && !IDF_TARGET_ESP32) || SOC_EXTERNAL_COEX_ADVANCE) && ESP_COEX_ENABLED
 		default n
 		help
 			Enable RPC handlers for external coexistence configuration from the host.
-			Requires CONFIG_EXTERNAL_COEX_ENABLE (Component config -> Wi-Fi -> External coexistence).
+			Requires CONFIG_ESP_COEX_EXTERNAL_COEXIST_ENABLE
+			(Component config → Wireless Coexistence → External Coexistence).
+
+			On chips with SOC_EXTERNAL_COEX_ADVANCE, external coexistence works
+			alongside Bluetooth. On other chips, BT controller must be disabled.
 
 	if ESP_HOSTED_CP_EXT_COEX
 
-		if BT_ENABLED
-			comment "⚠️  DISABLE idf BT for external coex. Disable BT_ENABLED (Component config → Bluetooth => Bluetooth)"
+		if BT_CONTROLLER_ENABLED && !SOC_EXTERNAL_COEX_ADVANCE
+			comment "⚠️  BT controller conflicts with external coex on this chip. Disable BT_CONTROLLER_ENABLED or use a chip with SOC_EXTERNAL_COEX_ADVANCE."
 		endif
 
-		if ESP_HOSTED_COPROCESSOR_BT_ENABLED
-			comment "⚠️  DISABLE Hosted BT flag for external coex. Disable ESP_HOSTED_COPROCESSOR_BT_ENABLED (Example Configuration => Enable BT sharing via hosted)"
+		if ESP_HOSTED_COPROCESSOR_BT_ENABLED && !SOC_EXTERNAL_COEX_ADVANCE
+			comment "⚠️  Hosted BT (controller on co-processor) conflicts with external coex on this chip. Disable ESP_HOSTED_COPROCESSOR_BT_ENABLED or use a chip with SOC_EXTERNAL_COEX_ADVANCE."
 		endif
 
 		if IDF_TARGET_ESP32
@@ -1409,7 +1488,7 @@ endif
 		endif
 
 		if !ESP_COEX_EXTERNAL_COEXIST_ENABLE
-			comment "⚠️  Enable WiFi external coexistence, ESP_COEX_EXTERNAL_COEXIST_ENABLE (Component config → Wireless Coexistence => External Coexistence)"
+			comment "⚠️  Enable WiFi external coexistence, ESP_COEX_EXTERNAL_COEXIST_ENABLE (Component config → Wireless Coexistence → External Coexistence)"
 		endif
 
 	endif

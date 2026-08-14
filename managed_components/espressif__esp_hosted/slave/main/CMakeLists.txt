@@ -9,9 +9,7 @@ set(COMPONENT_SRCS
 	"${common_dir}/utils/esp_hosted_cli.c"
 	"protocomm_pserial.c"
 	"esp_hosted_coprocessor.c"
-	"mempool.c"
 	"stats.c"
-	"mempool_ll.c"
 	"host_power_save.c"
 	"slave_light_sleep.c"
 	"nw_split_router.c"
@@ -19,7 +17,15 @@ set(COMPONENT_SRCS
 	"slave_gpio_expander.c"
 	"slave_ext_coex.c"
 	"slave_control.c"
+	"slave_util.c"
 )
+
+if(CONFIG_ESP_HOSTED_USE_MEMPOOL)
+	list(APPEND COMPONENT_SRCS
+		"${common_dir}/mempool/mempool_ll.c"
+		"${common_dir}/mempool/mempool.c"
+	)
+endif()
 
 if(CONFIG_SOC_BT_SUPPORTED)
 	list(APPEND COMPONENT_SRCS "slave_bt.c")
@@ -37,6 +43,10 @@ if (CONFIG_ESP_HOSTED_NETWORK_SPLIT_ENABLED)
 	list(APPEND COMPONENT_SRCS "slave_network_split.c")
 endif()
 
+if (CONFIG_ESP_HOSTED_OT_RCP_ENABLED)
+	list(APPEND COMPONENT_SRCS "slave_openthread.c")
+endif()
+
 set(COMPONENT_ADD_INCLUDEDIRS
 	"."
 	"${common_dir}"
@@ -44,6 +54,7 @@ set(COMPONENT_ADD_INCLUDEDIRS
 	"${common_dir}/proto"
 	"${common_dir}/rpc"
 	"${common_dir}/transport"
+	"${common_dir}/mempool/include"
 )
 
 if(CONFIG_SOC_BT_SUPPORTED)
@@ -95,3 +106,10 @@ target_include_directories(${COMPONENT_LIB} PRIVATE "${protocomm_dir}/src/common
 
 # Add linker options to wrap esp_wifi_init function
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_wifi_init")
+
+if(DEFINED ENV{ESP_HOSTED_CI_PEDANTIC})
+	target_compile_options(${COMPONENT_LIB} PRIVATE
+		-Werror -Werror=deprecated-declarations -Werror=unused-variable
+		-Werror=unused-but-set-variable -Werror=unused-function
+		$<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>)
+endif()

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/*
-Warning: The USB Host Library API is still a beta version and may be subject to change
-*/
-
 #pragma once
 
 #include <stdint.h>
@@ -24,6 +20,8 @@ extern "C" {
 #endif
 
 // ------------------------------------------------- Macros and Types --------------------------------------------------
+
+#define REMOTE_WAKE_HAL_SUPPORTED (1)  // Define for class drivers that this version of usb component supports the remote wakeup HAL API.
 
 // ----------------------- Handles -------------------------
 
@@ -50,6 +48,7 @@ typedef enum {
     USB_HOST_CLIENT_EVENT_DEV_GONE,                 /**< A device opened by the client is now gone */
     USB_HOST_CLIENT_EVENT_DEV_SUSPENDED,            /**< A device opened by the client is now suspended */
     USB_HOST_CLIENT_EVENT_DEV_RESUMED,              /**< A device opened by the client is now resumed */
+    USB_HOST_CLIENT_EVENT_DEV_REMOVED,              /**< A device has been removed. No device handle is provided */
 } usb_host_client_event_t;
 
 /**
@@ -80,6 +79,9 @@ typedef struct {
         struct {
             usb_device_handle_t dev_hdl;        /**< The handle of the device that was gone */
         } dev_gone;                             /**< Gone device info */
+        struct {
+            uint8_t address;                    /**< Removed device's address */
+        } dev_removed;                          /**< Removed device info */
         struct {
             usb_device_handle_t dev_hdl;        /**< The handle of the device that was suspended/resumed */
         } dev_suspend_resume;                   /**< Suspend/Resume device info */
@@ -153,6 +155,10 @@ typedef struct {
 typedef struct {
     bool is_synchronous;        /**< Whether the client is asynchronous or synchronous or not. Set to false for now. */
     int max_num_event_msg;      /**< Maximum number of event messages that can be stored (e.g., 3) */
+    struct {
+        uint32_t notify_dev_removed: 1;         /**< Whether the client should receive USB_HOST_CLIENT_EVENT_DEV_REMOVED events */
+        uint32_t reserved31: 31;                /**< Reserved for future use. Set to 0 */
+    } flags;                                    /**< Client behavior flags */
     union {     // Note: Made into union or future expansion
         struct {
             usb_host_client_event_cb_t client_event_callback;   /**< Client's event callback function */

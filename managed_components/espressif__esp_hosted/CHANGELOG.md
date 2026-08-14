@@ -1,8 +1,110 @@
 # Unreleased - Main Branch
 
-None
-
 # Releases
+
+# $${\color{green} \text{2.12.11}}$$
+
+- fixed SDIO deinit tearing down the shared SDMMC host (broke a co-existing SD card on the other slot)
+- fixed public headers failing to build under `-Werror=undef` (e.g. Matter/external host consumers)
+
+# $${\color{green} \text{2.12.10}}$$
+
+- added `esp_wifi_disable_pmf_config()` support (host ↔ co-processor RPC); previously returned `ESP_ERR_NOT_SUPPORTED`
+- fixed SDIO RX heap corruption on transport deinit and hardened RX buffer allocation
+
+# $${\color{green} \text{2.12.9}}$$
+
+- added gpios for `ESP32_P4X_C5_Function_EV_Board V2.0`
+- fix build break for IDF v6 when enable power save (API renamed)
+- update Kconfig to check for config `SOC_GPIO_SUPPORT_HP_PERIPH_PD_SLEEP_WAKEUP` introduced in IDF v6
+- fixed bug causing a crash in SPI-HD interface with IDF v6.1 due to new uninitialised member in `spi_bus_config_t`
+- reduced default number of buffers for SPI-HD and SPI-FD to resolve memory issues
+- Zigbee:
+  - added support for Zigbee
+  - added Home Automation thermostat on a Zigbee Coordinator example
+- added support for SPI-HD 1-bit mode (SPI 3-wire interface)
+  - **NOTE**: SPI-HD 1-bit mode is only supported on ESP-IDF v6.1 and above and requires [git Commit bf10423](https://github.com/espressif/esp-idf/commit/bf10423a5b01888b33ab1f4e45ef5a880eed69e6)
+- updated `_h_get_semaphore` and `_h_lock_mutex` to use milliseconds instead of seconds as a timeout parameter
+- added `_h_thread_yield` for use by threads to request a context switch
+
+# $${\color{green} \text{2.12.8}}$$
+
+- SDIO: added `ESP_HOSTED_MEMPOOL_PREFER_SPIRAM` to allocate transport buffers from PSRAM (e.g. ESP32-P4), saving internal RAM; off by default
+- OS APIs: `_h_get_semaphore` and `_h_lock_mutex` now take timeout in milliseconds (was seconds)
+- added `_h_thread_yield` for threads to request a context switch
+
+# $${\color{green} \text{2.12.7}}$$
+
+- OpenThread: added OpenThread over dedicated UART support
+  - co-processor is the OpenThead RCP (Radio Co-Processor)
+  - added host examples: `host_openthread_border_router`, `host_openthread_cli`
+- Common Mempool: fixed build error on ESP-IDF v6.x when using PicolibC with `CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY` disabled
+- Host: removed Unicode encoded characters in cmake file to prevent Windows build failure
+
+# $${\color{green} \text{2.12.6}}$$
+
+## Bug Fixes
+
+- make `TAG` in `mempool.c` static to avoid link-time clash with other components (#187)
+
+# $${\color{green} \text{2.12.5}}$$
+
+## Features
+
+### External Coexistence: allow with BT on advanced coex chips
+- Aligned Kconfig with IDF change that relaxes `ESP_COEX_EXTERNAL_COEXIST_ENABLE` dependency
+- On chips with `SOC_EXTERNAL_COEX_ADVANCE`, external coexistence now works alongside BT controller
+- Updated compile-time checks in `slave_ext_coex.h` to match (includes `soc/soc_caps.h`)
+
+## Bug Fixes
+
+- fixed CI to allow building ESP32 co-processor with ESP-IDF v5.5 for SPI-FD and UART transports: was running out of IRAM space
+- fixed CI build failure when building co-processor with ESP-IDF release/v5.3
+- added more ESP-IDF releases to CI for testing
+
+### OTA: fix image size calculation for partition-based OTA
+- Add 16-byte alignment padding before SHA256 hash in image size parser
+- Previously sent 15 fewer bytes than actual image, causing hash mismatch
+
+# $${\color{green} \text{2.12.4}}$$
+
+## Bug Fixes
+
+- fix build break on co-processor if using SPI-HD interface with 2 data lines
+
+## Features
+
+### Custom RPC callbacks: support user context pointer
+
+  - Allows passing per-callback context without global state
+  - User pointer is returned as-is on every invocation
+
+##### API Changes
+
+- `esp_hosted_register_custom_callback`
+
+```c
+// Old
+esp_err_t esp_hosted_register_custom_callback(
+    uint32_t msg_id,
+    void (*callback)(uint32_t msg_id, const uint8_t *data, size_t data_len));
+
+// New
+esp_err_t esp_hosted_register_custom_callback(
+    uint32_t msg_id,
+    void (*callback)(uint32_t msg_id, const uint8_t *data, size_t data_len, void *user),
+    void *user);
+```
+
+### Others
+
+- used common mempool code for both Host and Co-processor
+- made ESP-Hosted mempool code private to fix build break
+- added parameter checking for RPC calls
+
+## Bug Fixes
+
+- Host: added NULL or validation checks for exposed user APIs
 
 # $${\color{green} \text{2.12.3}}$$
 

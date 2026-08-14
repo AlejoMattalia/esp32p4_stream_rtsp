@@ -131,9 +131,17 @@ static int request(int socket_fd, int cseq, const char *method, const char *url,
             "%s %s RTSP/1.0\r\nCSeq: %d\r\nUser-Agent: Anny-ESP32P4/1.0\r\n%s%s\r\n",
             method, url, cseq, authorization, extra_headers ? extra_headers : "");
     if (header_length <= 0 || (size_t)header_length >= sizeof(header)) return -1;
+
+    ESP_LOGI(TAG, "=== REQUEST %s ===\n%s", method, header);
+    if (body && body_length > 0) {
+        ESP_LOGI(TAG, "=== BODY %s ===\n%s", method, body);
+    }
+
     if (send_all(socket_fd, header, (size_t)header_length) != 0) return -1;
     if (body && send_all(socket_fd, body, body_length) != 0) return -1;
-    return receive_response(socket_fd, response, response_size);
+    int status = receive_response(socket_fd, response, response_size);
+    ESP_LOGI(TAG, "=== RESPONSE %s ===\n%s", method, response);
+    return status;
 }
 
 static int build_sdp(char *output, size_t output_size)
@@ -268,11 +276,11 @@ static int publish_session(void)
     snprintf(track_url, sizeof(track_url), "%s/trackID=0", base_url);
     int cseq = 1;
     int status = request(socket_fd, cseq++, "ANNOUNCE", base_url, NULL, sdp, response, sizeof(response));
-    if (status != 200) { ESP_LOGE(TAG, "ANNOUNCE rechazado: HTTP %d", status); close(socket_fd); return -1; }
+    if (status != 200) { ESP_LOGE(TAG, "ANNOUNCE rechazado: HTTP %d\nRespuesta completa:\n%s", status, response); close(socket_fd); return -1; }
     status = request(socket_fd, cseq++, "SETUP", track_url,
                      "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n", NULL,
                      response, sizeof(response));
-    if (status != 200) { ESP_LOGE(TAG, "SETUP rechazado: HTTP %d", status); close(socket_fd); return -1; }
+    if (status != 200) { ESP_LOGE(TAG, "SETUP rechazado: HTTP %d\nRespuesta completa:\n%s", status, response); close(socket_fd); return -1; }
     const char *session_header = strstr(response, "Session:");
     if (session_header) {
         session_header += 8; while (*session_header == ' ') session_header++;

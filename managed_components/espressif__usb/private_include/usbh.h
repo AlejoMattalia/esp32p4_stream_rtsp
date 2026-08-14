@@ -41,6 +41,7 @@ typedef enum {
     USBH_EVENT_DEV_SUSPEND,         /**< A device has been suspended */
     USBH_EVENT_DEV_RESUME,          /**< A device has been resumed */
     USBH_EVENT_ALL_IDLE,            /**< All devices idle (all EPs halted and flushed) */
+    USBH_EVENT_DEV_REMOVED,         /**< A device has been removed. No device handle is provided */
 } usbh_event_t;
 
 /**
@@ -60,6 +61,9 @@ typedef struct {
             uint8_t dev_addr;
             usb_device_handle_t dev_hdl;
         } dev_gone_data;
+        struct {
+            uint8_t dev_addr;
+        } dev_removed_data;
         struct {
             unsigned int dev_uid;
             usb_device_handle_t parent_dev_hdl;
@@ -318,6 +322,21 @@ esp_err_t usbh_devs_mark_all_free(void);
  * @param[in] device_ctrl Device control command
  */
 void usbh_devs_set_pm_actions_all(usbh_dev_ctrl_t device_ctrl);
+
+#ifdef AUTO_PM_LIGHT_SLEEP
+/**
+ * @brief Halt and flush all endpoints on all devices (synchronous)
+ *
+ * Used by automatic light sleep enter before asserting DWC root suspend.
+ * @return
+ *    - ESP_OK: All devices flush/halt successful
+ *    - ESP_ERR_INVALID_STATE: USBH driver is not installed
+ *    - ESP_ERR_INVALID_SIZE: Too many devices connected for synchronous handling
+ *    - ESP_ERR_NOT_FINISHED: usb host lib busy, mutex to process the EPs can't be acquired. We bail the auto-suspend
+ *                            operation in favor of a low latency to enter light sleep.
+ */
+esp_err_t usbh_devs_halt_flush_all_sync(void);
+#endif // AUTO_PM_LIGHT_SLEEP
 
 /**
  * @brief Open a device by address

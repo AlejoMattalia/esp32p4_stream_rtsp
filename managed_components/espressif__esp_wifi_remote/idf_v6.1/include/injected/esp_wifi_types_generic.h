@@ -17,6 +17,8 @@ extern "C" {
 #endif
 
 #define WIFI_AP_DEFAULT_MAX_IDLE_PERIOD  292 /**< Default timeout for SoftAP BSS Max Idle. Unit: 1000TUs >**/
+#define MAX_SSID_LEN        32    /**< Maximum length of SSID */
+#define MAX_PASSPHRASE_LEN  64    /**< Maximum length of passphrase */
 
 /**
   * @brief Wi-Fi mode type
@@ -359,12 +361,13 @@ typedef enum {
 } wifi_sort_method_t;
 
 /**
-  * @brief Structure describing parameters for a Wi-Fi fast scan
+  * @brief Structure describing parameters for Wi-Fi scan during connection
   */
 typedef struct {
-    int8_t              rssi;             /**< The minimum rssi to accept in the fast scan mode. Defaults to -127 if set to >= 0 */
-    wifi_auth_mode_t    authmode;         /**< The weakest auth mode to accept in the fast scan mode
-                                               Note: In case this value is not set and password is set as per WPA2 standards(password len >= 8), it will be defaulted to WPA2 and device won't connect to deprecated WEP/WPA networks. Please set auth mode threshold as WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK to connect to WEP/WPA networks */
+    int8_t              rssi;             /**< The minimum rssi to accept in Wi-Fi scan. Defaults to -127 if set to >= 0 */
+    wifi_auth_mode_t    authmode;         /**< The weakest authentication mode to accept when scanning for Wi-Fi during connection.
+                                               Note: In case this value is not set and password is set as per WPA2 standards(password len >= 8), it will be defaulted to WPA2 and device won't connect to deprecated WEP/WPA networks. Please set auth mode threshold as WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK to connect to WEP/WPA networks.
+                                               If this is set to a mixed mode (for example, WPA_WPA2 or WPA2_WPA3), the minimum mode becomes the stronger of the two. For example, WPA_WPA2 becomes WPA2, and WPA2_WPA3 becomes WPA3. See `wifi_auth_mode_t` for details on relative strengths. */
     uint8_t             rssi_5g_adjustment; /**< The RSSI value of the 5G AP is within the rssi_5g_adjustment range compared to the 2G AP, the 5G AP will be given priority for connection. */
 } wifi_scan_threshold_t;
 
@@ -529,7 +532,7 @@ typedef struct {
     uint8_t channel;                          /**< Channel of soft-AP. Set to 0 for auto selection (min channel: typically 1 for 2.4G, 36 for 5G). Other invalid values return ESP_ERR_INVALID_ARG. */
     wifi_auth_mode_t authmode;                /**< Auth mode of soft-AP. Do not support AUTH_WEP, AUTH_WAPI_PSK and AUTH_OWE in soft-AP mode. When the auth mode is set to WPA2_PSK, WPA2_WPA3_PSK or WPA3_PSK, the pairwise cipher will be overwritten with WIFI_CIPHER_TYPE_CCMP by default, unless explicitly set.  */
     uint8_t ssid_hidden;                      /**< Broadcast SSID or not, default 0, broadcast the SSID */
-    uint8_t max_connection;                   /**< Max number of stations allowed to connect in */
+    uint8_t max_connection;                   /**< Max number of stations allowed to connect in. Please note that soft-AP and ESP-NOW share the same encryption hardware keys, so the max_connection parameter will be affected by CONFIG_WIFI_RMT_ESPNOW_MAX_ENCRYPT_NUM. */
     uint16_t beacon_interval;                 /**< Beacon interval which should be multiples of 100. Unit: TU(time unit, 1 TU = 1024 us). Range: 100 ~ 60000. Default value: 100 */
     uint8_t csa_count;                        /**< Channel Switch Announcement Count. Notify the station that the channel will switch after the csa_count beacon intervals. Default value: 3 */
     uint8_t dtim_period;                      /**< Dtim period of soft-AP. Range: 1 ~ 10. Default value: 1 */
@@ -592,10 +595,11 @@ typedef struct {
   * @brief NAN Discovery start configuration
   */
 typedef struct {
-    uint8_t op_channel;    /**< NAN Discovery operating channel */
-    uint8_t master_pref;   /**< Device's preference value to serve as NAN Master */
-    uint8_t scan_time;     /**< Scan time in seconds while searching for a NAN cluster */
-    uint16_t warm_up_sec;  /**< Warm up time before assuming NAN Anchor Master role */
+    uint8_t op_channel;     /**< NAN Discovery operating channel */
+    uint8_t master_pref;    /**< Device's preference value to serve as NAN Master */
+    uint8_t scan_time;      /**< Scan time in seconds while searching for a NAN cluster */
+    uint16_t warm_up_sec;   /**< Warm up time before assuming NAN Anchor Master role */
+    bool disable_random_mac;/**< Disable the MAC Randomisation in NAN */
 } wifi_nan_sync_config_t;
 
 /**
@@ -862,6 +866,10 @@ typedef struct {
 #define ESP_WIFI_NDP_ROLE_INITIATOR     1      /**< Initiator role for NAN Data Path */
 #define ESP_WIFI_NDP_ROLE_RESPONDER     2      /**< Responder role for NAN Data Path */
 
+#define ESP_WIFI_NAN_NDP_PMK_LEN        32     /**< Length of NAN Datapath PMK */
+#define ESP_WIFI_NAN_NDP_PMKID_LEN      16     /**< Length of NAN Datapath PMKID */
+#define ESP_WIFI_NAN_MAX_CREDS_PER_SVC  4      /**< Maximum number of NAN security credentials per service (passphrase/PMK entries) */
+
 #define ESP_WIFI_MAX_SVC_NAME_LEN       256    /**< Maximum length of NAN service name */
 #define ESP_WIFI_MAX_FILTER_LEN         256    /**< Maximum length of NAN service filter */
 #define ESP_WIFI_MAX_SVC_INFO_LEN       64     /**< Maximum length of NAN service info */
@@ -904,6 +912,64 @@ typedef enum {
 } wifi_nan_service_type_t;
 
 /**
+  * @brief NAN Cipher Suite IDs (Wi-Fi Aware v4.0 §4.1.1 & §6.1.1)
+  *
+  * @note Only WIFI_NAN_CSID_NCS_SK_128 is currently supported by the firmware.
+  *       The other values are reserved for future support; selecting any of
+  *       them via csid_bitmap will cause esp_wifi_nan_publish_service() and
+  *       esp_wifi_nan_subscribe_service() to fail.
+  */
+typedef enum {
+    WIFI_NAN_CSID_NCS_SK_128       = 1,    /**< NCS-SK-128 (PSK/Passphrase) */
+    WIFI_NAN_CSID_NCS_SK_256       = 2,    /**< NCS-SK-256 (PSK/Passphrase). Reserved: not supported right now. */
+    WIFI_NAN_CSID_NCS_PK_2WDH_128  = 3,    /**< NCS-PK-2WDH-128. Reserved: not supported right now. */
+    WIFI_NAN_CSID_NCS_PK_2WDH_256  = 4,    /**< NCS-PK-2WDH-256. Reserved: not supported right now. */
+    WIFI_NAN_CSID_NCS_PK_PASN_128  = 7,    /**< NCS-PK-PASN-128. Reserved: not supported right now. */
+    WIFI_NAN_CSID_NCS_PK_PASN_256  = 8,    /**< NCS-PK-PASN-256. Reserved: not supported right now. */
+} wifi_nan_cipher_suite_id_t;
+
+#define WIFI_NAN_CSID_BIT_NCS_SK_128       (1 << WIFI_NAN_CSID_NCS_SK_128)
+#define WIFI_NAN_CSID_BIT_NCS_SK_256       (1 << WIFI_NAN_CSID_NCS_SK_256)
+#define WIFI_NAN_CSID_BIT_NCS_PK_2WDH_128  (1 << WIFI_NAN_CSID_NCS_PK_2WDH_128)
+#define WIFI_NAN_CSID_BIT_NCS_PK_2WDH_256  (1 << WIFI_NAN_CSID_NCS_PK_2WDH_256)
+#define WIFI_NAN_CSID_BIT_NCS_PK_PASN_128  (1 << WIFI_NAN_CSID_NCS_PK_PASN_128)
+#define WIFI_NAN_CSID_BIT_NCS_PK_PASN_256  (1 << WIFI_NAN_CSID_NCS_PK_PASN_256)
+
+/**
+  * @brief NAN security credential - one passphrase or raw PMK + the cipher it's bound to.
+  *
+  * Per Wi-Fi Aware v4.0 §7.1.3.5 the PMKID derivation formula is cipher-specific
+  * (NCS-SK-128 uses HMAC-SHA-256; NCS-SK-256 uses HMAC-SHA-384), so each
+  * credential must carry the cipher it was provisioned for.
+  */
+typedef struct {
+    uint8_t csid;                                /**< Cipher Suite ID this credential is for (wifi_nan_cipher_suite_id_t value) */
+    uint8_t use_pmk: 1;                          /**< 0 - Use passphrase, 1 - Use PMK directly */
+    uint8_t reserved: 7;                         /**< Reserved */
+    char    passphrase[MAX_PASSPHRASE_LEN];      /**< NCS-SK passphrase (use_pmk=0). NUL-terminated. */
+    uint8_t pmk[ESP_WIFI_NAN_NDP_PMK_LEN];       /**< NCS-SK PMK (use_pmk=1). Raw bytes, not NUL-terminated. */
+} wifi_nan_credential_t;
+
+/**
+  * @brief NAN Discovery security parameters (Wi-Fi Aware v4.0 §4.1.1 - Publish/Subscribe)
+  *
+  * Per Wi-Fi Aware v4.0 §9.5.21.4 (SCIA) and §7.1.3.5 the Publish/Subscribe SDF
+  * may advertise multiple ND-PMKIDs (one per provisioned ND-PMK). Applications
+  * provide one or more credentials in @c creds; the stack derives PMK + PMKID
+  * per credential and emits the multi-SCID list. Subscriber-side, the library
+  * walks an incoming publisher's SCID list and matches against any of the
+  * locally-provisioned credentials. The CSIA cipher bitmap advertised on air
+  * is computed by the stack as the union of each credential's @c csid.
+  */
+typedef struct {
+    uint8_t group_data_prot: 1;                  /**< Group addressed data frame protection. Reserved: not supported right now. */
+    uint8_t group_mgmt_prot: 1;                  /**< Group addressed management frame protection. Reserved: not supported right now. */
+    uint8_t reserved: 6;                         /**< Reserved */
+    uint8_t num_credentials;                     /**< Number of valid entries in @c creds (0..ESP_WIFI_NAN_MAX_CREDS_PER_SVC). 0 = open service. */
+    wifi_nan_credential_t creds[ESP_WIFI_NAN_MAX_CREDS_PER_SVC]; /**< Credentials list. */
+} wifi_nan_discovery_security_params_t;
+
+/**
   * @brief USD specific configuration parameters
   *
   */
@@ -915,6 +981,17 @@ typedef struct {
     uint8_t m_min;                                  /**< Indicates minimum value of dwell period M used in the USD (Mmin) */
     uint8_t m_max;                                  /**< Indicates maximum value of dwell period M used in the USD (Mmax)*/
 } wifi_nan_usd_config_t;
+
+#define NAN_VENDOR_IE_MAX_BODY_LEN  255
+
+/**
+  * @brief NAN Vendor Specific Attribute format
+  */
+typedef struct {
+    uint8_t vendor_oui[WIFI_OUI_LEN]; /**< Vendor identifier (OUI) */
+    uint16_t body_len;                /**< Length of body payload (max 255 bytes) */
+    uint8_t *body;                    /**< Vendor specific body payload */
+} nan_vendor_ie_t;
 
 /**
   * @brief NAN Publish service configuration parameters
@@ -930,12 +1007,17 @@ typedef struct {
     uint8_t fsd_gas: 1;                             /**< 0 - Follow-up used for FSD, 1 - GAS used for FSD */
     uint8_t ndp_resp_needed: 1;                     /**< 0 - Auto-Accept NDP Requests, 1 - Require explicit response with esp_wifi_nan_datapath_resp */
     uint8_t usd_discovery_flag: 1;                  /**< 0 - NAN Synchronization for Discovery, 1 - USD for Discovery. 'NAN Discovery flag' from specification */
-    uint8_t reserved: 2;                            /**< Reserved */
+    uint8_t security_reqd: 1;                       /**< Security: 0 - Open, 1 - Required (NDP Security) */
+    uint8_t reserved: 1;                            /**< Reserved */
     uint16_t ssi_len;                               /**< Length of service specific info, maximum allowed length - ESP_WIFI_MAX_SVC_SSI_LEN */
     uint8_t *ssi;                                   /**< Service Specific Info of type wifi_nan_wfa_ssi_t for WFA defined protocols, otherwise proprietary and defined by Applications */
     unsigned int ttl;                               /**< Run publish function for a given time interval in seconds. If ttl=0 and usd_discovery_flag is enabled,
                                                          only one Publish message is transmitted */
     wifi_nan_usd_config_t usd_publish_config;       /**< USD configuration parameters. Relevant only when 'usd_discovery_flag' is set. */
+    wifi_nan_discovery_security_params_t *security_cfg; /**< Security configuration parameters. Used when security_reqd is set, NULL otherwise.
+                                                          The driver makes a private copy during esp_wifi_nan_publish_service();
+                                                          the caller may free this immediately after the call returns. */
+    nan_vendor_ie_t *vendor_ie;                     /**< Vendor specific IE to be added in publish frames */
 } wifi_nan_publish_cfg_t;
 
 /**
@@ -951,12 +1033,17 @@ typedef struct {
     uint8_t fsd_reqd: 1;                            /**< Further Service Discovery(FSD) required */
     uint8_t fsd_gas: 1;                             /**< 0 - Follow-up used for FSD, 1 - GAS used for FSD */
     uint8_t usd_discovery_flag: 1;                  /**< 0 - NAN Synchronization for Discovery, 1 - USD for Discovery. 'NAN Discovery flag' from specification */
-    uint8_t reserved: 3;                            /**< Reserved */
+    uint8_t security_reqd: 1;                       /**< Security: 0 - Open, 1 - Required (NDP Security) */
+    uint8_t reserved: 2;                            /**< Reserved */
     uint16_t ssi_len;                               /**< Length of service specific info, maximum allowed length - ESP_WIFI_MAX_SVC_SSI_LEN */
     uint8_t *ssi;                                   /**< Service Specific Info of type wifi_nan_wfa_ssi_t for WFA defined protocols, otherwise proprietary and defined by Applications */
     unsigned int ttl;                               /**< Run subscribe function for a given time interval in seconds. If ttl=0 and usd_discovery_flag is enabled,
                                                          the subscriber listens until the first service match is reported. */
     wifi_nan_usd_config_t usd_subscribe_config;     /**< USD configuration parameters. Relevant only when 'usd_discovery_flag' is set. */
+    wifi_nan_discovery_security_params_t *security_cfg; /**< Security configuration parameters. Used when security_reqd is set, NULL otherwise.
+                                                          The driver makes a private copy during esp_wifi_nan_subscribe_service();
+                                                          the caller may free this immediately after the call returns. */
+    nan_vendor_ie_t *vendor_ie;                     /**< Vendor specific IE to be added in subscribe frames */
 } wifi_nan_subscribe_cfg_t;
 
 /**
@@ -969,26 +1056,54 @@ typedef struct {
     uint8_t peer_mac[6];                            /**< Peer's MAC address */
     uint16_t ssi_len;                               /**< Length of service specific info, maximum allowed length - ESP_WIFI_MAX_FUP_SSI_LEN */
     uint8_t *ssi;                                   /**< Service Specific Info of type wifi_nan_wfa_ssi_t for WFA defined protocols, otherwise proprietary and defined by Applications */
+    nan_vendor_ie_t *vendor_ie;                     /**< Vendor specific IE to be added in followup frames */
 } wifi_nan_followup_params_t;
 
 /**
   * @brief NAN Datapath Request parameters
   *
+  * @note Datapath security is governed by the security_cfg passed to
+  *       esp_wifi_nan_subscribe_service(); the NAN library derives ND-PMK,
+  *       ND-PMKID and cipher selection internally from that subscribe-time
+  *       configuration and applies them to every NDP initiated against the
+  *       matched publisher. Per-NDP security parameters are not exposed on
+  *       this struct: the caller never handles raw key material.
+  *
+  * @note NCS-SK only. For pairing-based cipher suites (NCS-PK-PASN), the
+  *       per-peer ND-PMK is derived from a cached NPKSA and will be
+  *       installed via a separate pairing API; this struct will remain
+  *       unchanged.
   */
 typedef struct {
     uint8_t pub_id;         /**< Publisher's service instance id */
     uint8_t peer_mac[6];    /**< Peer's MAC address */
-    bool confirm_required;  /**< NDP Confirm frame required */
+    bool confirm_required;  /**< NDP Confirm frame required. Always used for the secure NDP handshake. */
 } wifi_nan_datapath_req_t;
 
 /**
   * @brief NAN Datapath Response parameters
   *
+  * @note Datapath security is governed by the security_cfg passed to
+  *       esp_wifi_nan_publish_service(); the NAN library derives ND-PMK,
+  *       ND-PMKID and cipher selection internally from that publish-time
+  *       configuration and applies them to every NDP this responder
+  *       accepts. Per-NDP security parameters are not exposed on this
+  *       struct: the caller never handles raw key material.
+  *
+  * @note NCS-SK only. For pairing-based cipher suites (NCS-PK-PASN), the
+  *       per-peer ND-PMK is derived from a cached NPKSA and will be
+  *       installed via a separate pairing API; this struct will remain
+  *       unchanged. The responder must already have the PMK cached at
+  *       M1 receive time (PMKID lookup happens before the indication
+  *       event), so per-NDP credential injection at response time is
+  *       not viable.
   */
 typedef struct {
     bool accept;            /**< True - Accept incoming NDP, False - Reject it */
     uint8_t ndp_id;         /**< NAN Datapath Identifier */
     uint8_t peer_mac[6];    /**< Peer's MAC address */
+    uint16_t ssi_len;       /**< Length of service specific info, maximum allowed length - ESP_WIFI_MAX_SVC_SSI_LEN */
+    uint8_t *ssi;           /**< Service Specific Info of type wifi_nan_wfa_ssi_t for WFA defined protocols, otherwise proprietary and defined by Applications */
 } wifi_nan_datapath_resp_t;
 
 /**
@@ -1212,8 +1327,6 @@ typedef enum {
     WPS_FAIL_REASON_MAX             /**< Max WPS fail reason */
 } wifi_event_sta_wps_fail_reason_t;
 
-#define MAX_SSID_LEN        32    /**< Maximum length of SSID */
-#define MAX_PASSPHRASE_LEN  64    /**< Maximum length of passphrase */
 #define MAX_WPS_AP_CRED     3     /**< Maximum number of AP credentials received from WPS handshake */
 
 /**
@@ -1300,6 +1413,7 @@ typedef struct {
     uint64_t t2;            /**< Time of arrival of FTM frame at FTM Initiator in pSec */
     uint64_t t3;            /**< Time of departure of ACK from FTM Initiator in pSec */
     uint64_t t4;            /**< Time of arrival of ACK at FTM Responder in pSec */
+    int16_t ppm;            /**< Clock frequency offset in parts per million (PPM) between local and peer device */
 } wifi_ftm_report_entry_t;
 
 /**
@@ -1392,7 +1506,9 @@ typedef struct {
     uint8_t datapath_reqd: 1;   /**< NAN Datapath required for the service */
     uint8_t fsd_reqd: 1;        /**< Further Service Discovery(FSD) required */
     uint8_t fsd_gas: 1;         /**< 0 - Follow-up used for FSD, 1 - GAS used for FSD */
-    uint8_t reserved: 5;        /**< Reserved */
+    uint8_t ndpe_support: 1;    /**< NDPE supported by peer */
+    uint8_t security_reqd: 1;   /**< Security: 0 - Open, 1 - Required (NDP Security) */
+    uint8_t reserved: 3;        /**< Reserved */
     uint32_t reserved_1;        /**< Reserved */
     uint32_t reserved_2;        /**< Reserved */
     uint8_t ssi_version;        /**< Indicates version of SSI in Publish instance, 0 if not available */
@@ -1449,8 +1565,7 @@ typedef struct {
     uint8_t peer_nmi[6];                        /**< Peer's NAN Management Interface MAC */
     uint8_t peer_ndi[6];                        /**< Peer's NAN Data Interface MAC */
     uint8_t own_ndi[6];                         /**< Own NAN Data Interface MAC */
-    uint32_t reserved_1;                        /**< Reserved */
-    uint32_t reserved_2;                        /**< Reserved */
+    uint8_t ipv6_identifier[8];                 /**< Peer's IPV6 Address Identifier */
     uint16_t ssi_len;                           /**< Length of Service Specific Info */
     uint8_t ssi[];                              /**< Service specific info from NDP/NDPE Attribute */
 } wifi_event_ndp_confirm_t;
@@ -1488,7 +1603,6 @@ typedef struct {
     bool dcm;                                /**< Using dcm rate to send frame */
 } wifi_tx_rate_config_t;
 
-#define WIFI_MAX_SUPPORT_COUNTRY_NUM 176 /**< max number of supported countries */
 #ifdef CONFIG_SLAVE_SOC_WIFI_SUPPORT_5G
 #define WIFI_MAX_REGULATORY_RULE_NUM  7 /**< max number of regulatory rules */
 #else

@@ -9,6 +9,7 @@ if(CONFIG_ESP_HOSTED_ENABLED)
 		"${host_dir}/api/src/esp_hosted_transport_config.c"
 		"${host_dir}/api/src/esp_hosted_ota_api.c"
 		"${host_dir}/drivers/transport/transport_drv.c"
+		"${host_dir}/drivers/transport/transport_util.c"
 		"${host_dir}/drivers/serial/serial_ll_if.c"
 		"${host_dir}/utils/stats.c"
 		"${host_dir}/drivers/serial/serial_drv.c")
@@ -51,10 +52,6 @@ if(CONFIG_ESP_HOSTED_ENABLED)
 	list(APPEND srcs  "${virt_serial_dir}/serial_if.c")
 	list(APPEND priv_include "${virt_serial_dir}")
 
-	# mempool
-	list(APPEND srcs "${host_dir}/drivers/mempool/mempool.c")
-	list(APPEND priv_include "${host_dir}/drivers/mempool" )
-
 	# slave and host common files
 	set(common_dir "${FG_root_dir}/common")
 
@@ -70,6 +67,12 @@ if(CONFIG_ESP_HOSTED_ENABLED)
 		"${common_dir}/protobuf-c"
 		"${common_dir}/proto" )
 
+	# mempool
+	if (CONFIG_ESP_HOSTED_USE_MEMPOOL)
+		list(APPEND srcs "${common_dir}/mempool/mempool_ll.c"
+			"${common_dir}/mempool/mempool.c")
+	endif()
+	list(APPEND priv_include "${common_dir}/mempool/include" )
 
 	# cli
 	list(APPEND srcs "${common_dir}/utils/esp_hosted_cli.c")
@@ -120,13 +123,17 @@ if(CONFIG_ESP_HOSTED_ENABLED)
 		list(APPEND srcs "${host_dir}/port/esp/freertos/src/port_esp_hosted_host_uart.c")
 	endif()
 
+	# OpenThread utility functions
+	if(CONFIG_ESP_HOSTED_HOST_OT_ENABLE)
+		list(APPEND srcs "${host_dir}/port/esp/freertos/src/port_esp_hosted_host_ot_util.c")
+	endif()
 endif()
 
 if(EXISTS "${IDF_PATH}/components/esp_driver_sdio")
-    message(STATUS "Using new driver components (IDF ≥ 5.0)")
+    message(STATUS "Using new driver components (IDF >= 5.0)")
     list(APPEND driver_requires esp_driver_sdmmc esp_driver_spi esp_driver_uart esp_driver_gpio)
 else()
-    message(STATUS "Using legacy driver component (IDF ≤ 4.4)")
+    message(STATUS "Using legacy driver component (IDF <= 4.4)")
     list(APPEND driver_requires driver)
 endif()
 
@@ -134,12 +141,19 @@ endif()
 list(APPEND driver_requires esp_event)
 
 idf_component_register(SRCS ${srcs}
-	PRIV_REQUIRES soc esp_netif esp_timer driver esp_wifi bt esp_http_client console wpa_supplicant
+	PRIV_REQUIRES soc esp_netif esp_timer driver esp_wifi bt esp_http_client console wpa_supplicant openthread
 	REQUIRES ${driver_requires}
 	INCLUDE_DIRS ${pub_include}
 	PRIV_INCLUDE_DIRS ${priv_include})
 
 idf_component_set_property(${COMPONENT_NAME} WHOLE_ARCHIVE TRUE)
+
+if(DEFINED ENV{ESP_HOSTED_CI_PEDANTIC})
+	target_compile_options(${COMPONENT_LIB} PRIVATE
+		-Werror -Werror=deprecated-declarations -Werror=unused-variable
+		-Werror=unused-but-set-variable -Werror=unused-function
+		$<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>)
+endif()
 
 if(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE)
 	idf_component_optional_requires(PRIVATE sdmmc)

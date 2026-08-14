@@ -110,27 +110,36 @@ void hosted_free(void* ptr)
 
 void *hosted_realloc(void *mem, size_t newsize)
 {
-	void *p = NULL;
-
 	if (newsize == 0) {
 		HOSTED_FREE(mem);
 		return NULL;
 	}
 
-	p = hosted_malloc(newsize);
-	if (p) {
-		/* zero the memory */
-		if (mem != NULL) {
-			hosted_memcpy(p, mem, newsize);
-			HOSTED_FREE(mem);
-		}
-	}
-	return p;
+	/* Use libc realloc: it knows the old allocation size and copies only the
+	 * valid bytes. The previous malloc + memcpy(newsize) over-read `mem` by
+	 * the (newsize - oldsize) growth delta — `mem` only held oldsize bytes —
+	 * which faults when the old block sits at the top of RAM (the serial RX
+	 * reassembly buffer in serial_ll_if.c grows through this realloc).
+	 * hosted_malloc/HOSTED_FREE are plain malloc/free, so realloc is a safe
+	 * drop-in on the same heap. */
+	return realloc(mem, newsize);
 }
 
 void *hosted_malloc_align(size_t size, size_t align)
 {
-	return heap_caps_aligned_alloc(align, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+	void *ptr = NULL;
+
+#if CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM
+	/* On targets where GDMA can reach PSRAM through cache (e.g. ESP32-P4),
+	 * prefer DMA-capable SPIRAM to preserve scarce internal RAM. */
+	ptr = heap_caps_aligned_alloc(align, size,
+			MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+#endif
+	if (!ptr) {
+		ptr = heap_caps_aligned_alloc(align, size,
+				MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+	}
+	return ptr;
 }
 
 void hosted_free_align(void* ptr)
@@ -218,6 +227,11 @@ int hosted_thread_cancel(void *thread_handle)
 
 	HOSTED_FREE(thread_handle);
 	return RET_OK;
+}
+
+void hosted_thread_yield(void)
+{
+	taskYIELD();
 }
 
 /* -------- Sleeps -------------- */
@@ -414,7 +428,7 @@ void * hosted_create_mutex(void)
 }
 
 
-int hosted_lock_mutex(void * mutex_handle, int timeout)
+int hosted_lock_mutex(void * mutex_handle, int timeout_ms)
 {
 	mutex_handle_t *mut_id = NULL;
 	int mut_locked = 0;
@@ -430,7 +444,7 @@ int hosted_lock_mutex(void * mutex_handle, int timeout)
 		return RET_INVALID;
 	}
 
-	mut_locked = xSemaphoreTake(*mut_id, HOSTED_BLOCK_MAX);
+	mut_locked = xSemaphoreTake(*mut_id, pdMS_TO_TICKS(timeout_ms));
 	if (mut_locked == pdTRUE)
 		return 0;
 
@@ -528,7 +542,7 @@ void * hosted_create_semaphore(int maxCount)
 }
 
 
-int hosted_get_semaphore(void * semaphore_handle, int timeout)
+int hosted_get_semaphore(void * semaphore_handle, int timeout_ms)
 {
 	semaphore_handle_t *sem_id = NULL;
 	int sem_acquired = 0;
@@ -544,14 +558,14 @@ int hosted_get_semaphore(void * semaphore_handle, int timeout)
 		return RET_INVALID;
 	}
 
-	if (!timeout) {
+	if (!timeout_ms) {
 		/* non blocking */
 		sem_acquired = xSemaphoreTake(*sem_id, 0);
-	} else if (timeout<0) {
+	} else if (timeout_ms < 0) {
 		/* Blocking */
 		sem_acquired = xSemaphoreTake(*sem_id, HOSTED_BLOCK_MAX);
 	} else {
-		sem_acquired = xSemaphoreTake(*sem_id, pdMS_TO_TICKS(SEC_TO_MILLISEC(timeout)));
+		sem_acquired = xSemaphoreTake(*sem_id, pdMS_TO_TICKS(timeout_ms));
 	}
 
 	if (sem_acquired == pdTRUE)
@@ -861,7 +875,11 @@ int hosted_config_host_power_save(uint32_t power_save_type, void* gpio_port, uin
 		if (!esp_sleep_is_valid_wakeup_gpio(gpio_num)) {
 			return -1;
 		}
+#if H_HOST_USE_HP_PERIPH_POWERDOWN
+		return esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(BIT(gpio_num), level);
+#else
 		return esp_deep_sleep_enable_gpio_wakeup(BIT(gpio_num), level);
+#endif
 	}
 #endif
 	return -1;
@@ -923,6 +941,7 @@ hosted_osi_funcs_t g_hosted_osi_funcs = {
 	._h_free_align               =  hosted_free_align              ,
 	._h_thread_create            =  hosted_thread_create           ,
 	._h_thread_cancel            =  hosted_thread_cancel           ,
+	._h_thread_yield             =  hosted_thread_yield            ,
 	._h_msleep                   =  hosted_msleep                  ,
 	._h_usleep                   =  hosted_usleep                  ,
 	._h_sleep                    =  hosted_sleep                   ,

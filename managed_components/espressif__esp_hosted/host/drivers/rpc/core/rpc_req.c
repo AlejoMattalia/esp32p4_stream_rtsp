@@ -525,6 +525,11 @@ int compose_rpc_req(Rpc *req, ctrl_cmd_t *app_req, int32_t *failure_status)
 				rpc__req__wifi_get_inactive_time__init);
 		req_payload->ifx = app_req->u.wifi_inactive_time.ifx;
 		break;
+	} case RPC_ID__Req_WifiDisablePmfConfig: {
+		RPC_ALLOC_ASSIGN(RpcReqWifiDisablePmfConfig, req_wifi_disable_pmf_config,
+				rpc__req__wifi_disable_pmf_config__init);
+		req_payload->ifx = app_req->u.wifi_disable_pmf_config.ifx;
+		break;
 #if H_WIFI_HE_SUPPORT
 	} case RPC_ID__Req_WifiStaTwtConfig: {
 		RPC_ALLOC_ASSIGN(RpcReqWifiStaTwtConfig, req_wifi_sta_twt_config,
@@ -659,6 +664,9 @@ int compose_rpc_req(Rpc *req, ctrl_cmd_t *app_req, int32_t *failure_status)
 		case FEATURE_BT:
 			req_payload->feature = RPC_FEATURE__Feature_Bluetooth;
 			break;
+		case FEATURE_OPENTHREAD_RCP:
+			req_payload->feature = RPC_FEATURE__Feature_Openthread_Rcp;
+			break;
 		default:
 			req_payload->feature = RPC_FEATURE__Feature_None;
 			break;
@@ -676,6 +684,21 @@ int compose_rpc_req(Rpc *req, ctrl_cmd_t *app_req, int32_t *failure_status)
 		case FEATURE_COMMAND_BT_DISABLE:
 			req_payload->command = RPC_FEATURE_COMMAND__Feature_Command_BT_Disable;
 			break;
+		case FEATURE_COMMAND_INIT:
+			req_payload->command = RPC_FEATURE_COMMAND__Feature_Command_Init;
+			break;
+		case FEATURE_COMMAND_DEINIT:
+			req_payload->command = RPC_FEATURE_COMMAND__Feature_Command_Deinit;
+			break;
+		case FEATURE_COMMAND_ENABLE:
+			req_payload->command = RPC_FEATURE_COMMAND__Feature_Command_Enable;
+			break;
+		case FEATURE_COMMAND_DISABLE:
+			req_payload->command = RPC_FEATURE_COMMAND__Feature_Command_Disable;
+			break;
+		case FEATURE_COMMAND_QUERY:
+			req_payload->command = RPC_FEATURE_COMMAND__Feature_Command_Query;
+			break;
 		default:
 			req_payload->command = RPC_FEATURE_COMMAND__Feature_Command_None;
 			break;
@@ -683,6 +706,18 @@ int compose_rpc_req(Rpc *req, ctrl_cmd_t *app_req, int32_t *failure_status)
 		switch (app_req->u.feature_control.option) {
 		case FEATURE_OPTION_BT_DEINIT_RELEASE_MEMORY:
 			req_payload->option = RPC_FEATURE_OPTION__Feature_Option_BT_Deinit_Release_Memory;
+			break;
+		case FEATURE_OPTION_QUERY_CONFIGURED:
+			req_payload->option = RPC_FEATURE_OPTION__Feature_Option_Query_Configured;
+			break;
+		case FEATURE_OPTION_QUERY_INITED:
+			req_payload->option = RPC_FEATURE_OPTION__Feature_Option_Query_Inited;
+			break;
+		case FEATURE_OPTION_QUERY_ENABLED:
+			req_payload->option = RPC_FEATURE_OPTION__Feature_Option_Query_Enabled;
+			break;
+		case FEATURE_OPTION_QUERY_READY:
+			req_payload->option = RPC_FEATURE_OPTION__Feature_Option_Query_Ready;
 			break;
 		default:
 			req_payload->option = RPC_FEATURE_OPTION__Feature_Option_None;

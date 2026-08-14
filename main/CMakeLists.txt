@@ -1,13 +1,17 @@
 # See the build system documentation in IDF programming guide
 # for more information about component CMakeLists.txt files.
 
-file (GLOB srcs_files "../wifi_camera_rtsp/*.c")
-file (GLOB incs_files "../wifi_camera_rtsp")
+file(GLOB srcs_files "../wifi_camera_rtsp/*.c")
 
 idf_component_register(
-    SRCS "main.c" ${srcs_files}         
-    INCLUDE_DIRS ${incs_files}        
-    PRIV_INCLUDE_DIRS   
+    SRCS
+        "main.c"
+        ${srcs_files}
+
+    INCLUDE_DIRS
+        "."
+        "../wifi_camera_rtsp"
+
     REQUIRES
         esp_video
         esp_wifi
@@ -19,6 +23,5 @@ idf_component_register(
         mbedtls
         esp_driver_cam
         esp_driver_isp
-        esp_cam_sensor               
-    PRIV_REQUIRES       
+        esp_cam_sensor
 )

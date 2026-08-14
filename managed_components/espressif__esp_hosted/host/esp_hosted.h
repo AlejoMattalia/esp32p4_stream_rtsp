@@ -53,6 +53,9 @@ int esp_hosted_get_cp_info(uint32_t *cp_chip_id, char *cp_target_name, size_t cp
  * 7. Host Power Save API
  *    File : host/api/include/esp_hosted_power_save.h
  *
+ * 8. OpenThread RCP API
+ *    File : host/api/include/esp_hosted_openthread.h
+ *
  */
 
 #ifdef __cplusplus

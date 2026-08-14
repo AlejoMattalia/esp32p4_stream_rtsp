@@ -325,6 +325,14 @@ config WIFI_RMT_WPA3_COMPATIBLE_SUPPORT # ignore: multiple-definition
     help
         Select this option to support wpa3_compatible mode for station and AP
 
+config WIFI_RMT_ENABLE_WPA3_OWE_SOFTAP # ignore: multiple-definition
+    bool "Enable OWE-ONLY SOFTAP"
+    default y
+    select WIFI_RMT_MBEDTLS_CRYPTO
+    depends on WIFI_RMT_SOFTAP_SUPPORT
+    help
+        Select this option to allow the device to enable OWE Only mode for softap.
+
 config WIFI_RMT_SLP_IRAM_OPT # ignore: multiple-definition
     bool "WiFi SLP IRAM speed optimization"
     select PM_SLP_DEFAULT_PARAMS_OPT
@@ -438,7 +446,8 @@ config WIFI_RMT_SLP_BEACON_LOST_OPT # ignore: multiple-definition
 config WIFI_RMT_SLP_BEACON_LOST_TIMEOUT # ignore: multiple-definition
     int "Beacon loss timeout"
     range 5 100
-    default 10
+    default 25 if ESP_COEX_SW_COEXIST_ENABLE
+    default 10 if (!ESP_COEX_SW_COEXIST_ENABLE)
     depends on WIFI_RMT_SLP_BEACON_LOST_OPT
     help
         Timeout time for close rf phy when beacon loss occurs, Unit: 1024 microsecond.
@@ -562,6 +571,23 @@ config WIFI_RMT_NAN_SYNC_ENABLE # ignore: multiple-definition
     select LWIP_IPV6
     help
         Enable Wi-Fi Aware: Synchronization feature (NAN-Sync).
+
+config WIFI_RMT_NAN_SECURITY # ignore: multiple-definition
+    bool "Enable Wi-Fi Aware: Encrypted Pairwise Datapath (NDP Security)"
+    depends on WIFI_RMT_NAN_SYNC_ENABLE && IDF_EXPERIMENTAL_FEATURES && WIFI_RMT_MBEDTLS_CRYPTO
+    select MBEDTLS_PKCS5_C
+    select MBEDTLS_SHA256_C
+    default n
+    help
+        Enable encrypted pairwise datapath for Wi-Fi Aware (NAN).
+        Adds PBKDF2 key derivation (mbedTLS PKCS#5), 4-way handshake (M1-M4),
+        PTK derivation, and CCMP key installation for secured NAN
+        data links. Disable to save code size when only open
+        datapaths are needed.
+
+        Requires WIFI_RMT_MBEDTLS_CRYPTO + MBEDTLS_PKCS5_C + MBEDTLS_SHA256_C
+        for ND-PMK derivation via pbkdf2_sha256() (MBEDTLS_MD_C is pulled in
+        transitively by MBEDTLS_PKCS5_C).
 
 config WIFI_RMT_NAN_USD_ENABLE # ignore: multiple-definition
     bool "Enable Wi-Fi Aware: Unsynchronized service discovery (NAN-USD)"
@@ -688,18 +714,12 @@ config WIFI_RMT_MBO_SUPPORT # ignore: multiple-definition
         Select this option to enable WiFi Multiband operation certification support.
 
 config WIFI_RMT_ENABLE_ROAMING_APP # ignore: multiple-definition
-    bool "Advanced support for Wi-Fi Roaming (Experimental)"
-    depends on IDF_EXPERIMENTAL_FEATURES
+    bool "Advanced support for Wi-Fi Roaming"
     default n
     help
         Enable Espressif's roaming app to allow for efficient Wi-Fi roaming.
         This includes configurable periodic environment scans, maintaining a cache of the
         best APs, handling low rssi events etc.
-
-        Risk Warning
-        Please note that this feature is still experimental and enabling this potentially can
-        lead to unpredictable scanning, connection and roaming attempts.
-        We are still working on tuning and optimising this feature to ensure reliable and stable use.
 
 menu "Configure roaming App"
     depends on WIFI_RMT_ENABLE_ROAMING_APP
@@ -1011,6 +1031,13 @@ if WIFI_RMT_WPA3_COMPATIBLE_SUPPORT
         default WIFI_RMT_WPA3_COMPATIBLE_SUPPORT
 endif
 
+if WIFI_RMT_ENABLE_WPA3_OWE_SOFTAP
+    config ESP_WIFI_ENABLE_WPA3_OWE_SOFTAP # ignore: multiple-definition
+        bool
+        depends on WIFI_RMT_SOFTAP_SUPPORT
+        default WIFI_RMT_ENABLE_WPA3_OWE_SOFTAP
+endif
+
 if WIFI_RMT_SLP_IRAM_OPT
     config ESP_WIFI_SLP_IRAM_OPT # ignore: multiple-definition
         bool
@@ -1152,6 +1179,13 @@ if WIFI_RMT_NAN_SYNC_ENABLE
         default WIFI_RMT_NAN_SYNC_ENABLE
 endif
 
+if WIFI_RMT_NAN_SECURITY
+    config ESP_WIFI_NAN_SECURITY # ignore: multiple-definition
+        bool
+        depends on WIFI_RMT_NAN_SYNC_ENABLE && IDF_EXPERIMENTAL_FEATURES && WIFI_RMT_MBEDTLS_CRYPTO
+        default WIFI_RMT_NAN_SECURITY
+endif
+
 if WIFI_RMT_NAN_USD_ENABLE
     config ESP_WIFI_NAN_USD_ENABLE # ignore: multiple-definition
         bool
@@ -1229,7 +1263,6 @@ endif
 if WIFI_RMT_ENABLE_ROAMING_APP
     config ESP_WIFI_ENABLE_ROAMING_APP # ignore: multiple-definition
         bool
-        depends on IDF_EXPERIMENTAL_FEATURES
         default WIFI_RMT_ENABLE_ROAMING_APP
 endif
 

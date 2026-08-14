@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "esp_idf_version.h"
 #include "driver/sdmmc_defs.h"
 #include "driver/sdmmc_host.h"
 
@@ -33,7 +34,7 @@ DEFINE_LOG_TAG(sdio_wrapper);
 	} while (0);
 
 #define SDIO_LOCK(x) do { \
-	if (x) g_h.funcs->_h_lock_mutex(sdio_bus_lock, portMAX_DELAY); \
+	if (x) g_h.funcs->_h_lock_mutex(sdio_bus_lock, HOSTED_BLOCK_MAX); \
 } while (0);
 
 #define SDIO_UNLOCK(x) do { \
@@ -303,7 +304,12 @@ int hosted_sdio_deinit(void* ctx)
 		sdio_bus_lock = NULL;
 	}
 
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+	sdmmc_host_deinit_slot(context->config.slot);
+#else
+	/* slot-scoped deinit added in IDF v5.4 */
 	sdmmc_host_deinit();
+#endif
 
 	return ESP_OK;
 }

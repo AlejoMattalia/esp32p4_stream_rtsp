@@ -34,11 +34,13 @@ typedef enum {
 	// spi hd capabilities
 	ESP_SPI_HD_INTERFACE_SUPPORT_2_DATA_LINES = (1 << 0),
 	ESP_SPI_HD_INTERFACE_SUPPORT_4_DATA_LINES = (1 << 1),
+	ESP_SPI_HD_INTERFACE_SUPPORT_1_DATA_LINE  = (1 << 2),
 	// leave a gap for future expansion
 
 	// features supported
 	ESP_WLAN_SUPPORT         = (1 << 4),
 	ESP_BT_INTERFACE_SUPPORT = (1 << 5), // bt supported over current interface
+	ESP_OT_SUPPORT           = (1 << 6), // openthread supported
 	// leave a gap for future expansion
 
 	// Hosted UART interface

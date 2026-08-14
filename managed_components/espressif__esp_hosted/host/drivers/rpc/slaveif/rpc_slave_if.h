@@ -71,6 +71,7 @@ extern "C" {
 typedef enum {
 	FEATURE_NONE,
 	FEATURE_BT,
+	FEATURE_OPENTHREAD_RCP,
 	// add additional features here
 } rpc_feature;
 
@@ -80,12 +81,22 @@ typedef enum {
 	FEATURE_COMMAND_BT_DEINIT,
 	FEATURE_COMMAND_BT_ENABLE,
 	FEATURE_COMMAND_BT_DISABLE,
+	// these can apply to any generic feature
+	FEATURE_COMMAND_INIT,
+	FEATURE_COMMAND_DEINIT,
+	FEATURE_COMMAND_ENABLE,
+	FEATURE_COMMAND_DISABLE,
+	FEATURE_COMMAND_QUERY,
 	// add additional feature commands here
 } rpc_feature_command;
 
 typedef enum {
 	FEATURE_OPTION_NONE,
 	FEATURE_OPTION_BT_DEINIT_RELEASE_MEMORY,
+	FEATURE_OPTION_QUERY_CONFIGURED,
+	FEATURE_OPTION_QUERY_INITED,
+	FEATURE_OPTION_QUERY_ENABLED,
+	FEATURE_OPTION_QUERY_READY,
 	// add additional feature options here
 } rpc_feature_option;
 
@@ -250,6 +261,10 @@ typedef struct {
 	wifi_interface_t ifx;
 	uint16_t sec;
 } rpc_wifi_inactive_time_t;
+
+typedef struct {
+	wifi_interface_t ifx;
+} rpc_wifi_disable_pmf_config_t;
 
 #if H_WIFI_HE_SUPPORT
 typedef struct {
@@ -472,6 +487,8 @@ typedef struct Ctrl_cmd_t {
 		rpc_wifi_sta_get_aid_t      wifi_sta_get_aid;
 
 		rpc_wifi_inactive_time_t    wifi_inactive_time;
+
+		rpc_wifi_disable_pmf_config_t wifi_disable_pmf_config;
 
 		rpc_coprocessor_fwversion_t coprocessor_fwversion;
 
@@ -838,6 +855,7 @@ ctrl_cmd_t * rpc_slave_feature_command(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_iface_mac_addr_len_get(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_set_inactive_time(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_get_inactive_time(ctrl_cmd_t *req);
+ctrl_cmd_t * rpc_slaveif_wifi_disable_pmf_config(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_sta_twt_config(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_sta_itwt_setup(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_sta_itwt_teardown(ctrl_cmd_t *req);
@@ -882,8 +900,9 @@ ctrl_cmd_t * rpc_slaveif_supp_dpp_stop_listen(ctrl_cmd_t *req);
 
 #ifdef H_PEER_DATA_TRANSFER
 ctrl_cmd_t * rpc_slaveif_custom_rpc(ctrl_cmd_t *req);
-int rpc_slaveif_register_custom_callback(uint32_t msg_id,
-		void (*callback)(uint32_t msg_id, const uint8_t *data, size_t data_len));
+int rpc_slaveif_register_custom_callback(uint32_t msg_id_exp,
+		void (*callback)(uint32_t msg_id_recvd, const uint8_t *data_recvd, size_t data_len_recvd, void *local_context),
+		void *local_context);
 #endif
 
 #if H_GPIO_EXPANDER_SUPPORT

@@ -89,6 +89,9 @@
 #include "port_esp_hosted_host_config.h"
 #include "esp_hosted_event.h"
 
+#include "mempool.h"
+#include "transport_util.h"
+
 static const char TAG[] = "H_SDIO_DRV";
 
 /* when enabled, read all required SDIO slave registers in a single
@@ -102,6 +105,24 @@ static const char TAG[] = "H_SDIO_DRV";
 // default queue sizes if unable to get from transport config
 #define DEFAULT_TO_SLAVE_QUEUE_SIZE       20
 #define DEFAULT_FROM_SLAVE_QUEUE_SIZE     20
+
+#if H_USE_MEMPOOL
+/*
+ * Tx is expected to be mainly zerocopy tx of packets allocated in transport_drv,
+ * so a minimal Tx mempool is required to handle that, plus serial and bt data
+ *
+ * Rx needs a larger mempool based on expected Rx packets of:
+ * - network data (largest user)
+ * - serial data (minimal)
+ * - bt data (minimal)
+ */
+
+#define MIN_MEMPOOL_BT_PACKETS        3
+#define MIN_MEMPOOL_SERIAL_PACKETS    3
+#define MIN_MEMPOOL_NET_PACKETS       5
+
+#define MIN_MEMPOOL_REQ (MIN_MEMPOOL_BT_PACKETS + MIN_MEMPOOL_SERIAL_PACKETS + MIN_MEMPOOL_NET_PACKETS)
+#endif
 
 #define RX_TASK_STACK_SIZE                CONFIG_ESP_HOSTED_DFLT_TASK_STACK
 #define TX_TASK_STACK_SIZE                CONFIG_ESP_HOSTED_DFLT_TASK_STACK
@@ -150,8 +171,10 @@ static void * sdio_bus_lock;
 static uint8_t *reg_buf = NULL;
 #endif
 
+#if H_USE_MEMPOOL
 /* Create mempool for cache mallocs */
-static struct mempool * buf_mp_g;
+static hosted_mempool_t * buf_mp_g;
+#endif
 
 extern transport_channel_t *chan_arr[ESP_MAX_IF];
 
@@ -170,6 +193,12 @@ static uint32_t sdio_tx_buf_count = 0;
 
 /* Counter to hold the amount of bytes already received from sdio slave */
 static uint32_t sdio_rx_byte_count = 0;
+
+/* True between "OOM start" and "OOM end" log lines. RX and TX share buf_mp_g,
+ * so one flag covers both paths: whichever fails first logs OOM start;
+ * whichever next allocates successfully logs OOM end and clears the flag.
+ * Touched only from the rx and tx tasks. */
+static bool mempool_oom_logged = false;
 
 // one-time trigger to start write thread
 static bool sdio_start_write_thread = false;
@@ -207,29 +236,43 @@ static void sdio_write_task(void const* pvParameters);
 static void sdio_read_task(void const* pvParameters);
 static void sdio_process_rx_task(void const* pvParameters);
 
-static inline void sdio_mempool_create(void)
+static inline void sdio_mempool_create(int tx_q_size, int rx_q_size)
 {
-	buf_mp_g = mempool_create(MAX_SDIO_BUFFER_SIZE);
-#ifdef H_USE_MEMPOOL
+#if H_USE_MEMPOOL
+	hosted_mempool_config_t config = {
+		.pre_allocated_mem = NULL,
+		.pre_allocated_mem_size = 0,
+		// allocate enough blocks to handle full RX and possible peak tx requests
+		.num_blocks = rx_q_size + MIN_MEMPOOL_REQ,
+		.block_size = MAX_SDIO_BUFFER_SIZE,
+		.alignment_in_bytes = HOSTED_MEM_ALIGNMENT_64,
+		.malloc = transport_util_malloc,
+		.calloc = transport_util_calloc,
+		.memset = g_h.funcs->_h_memset,
+		.free   = g_h.funcs->_h_free,
+	};
+	buf_mp_g = hosted_mempool_create(&config);
 	assert(buf_mp_g);
 #endif
 }
 
 static inline void sdio_mempool_destroy(void)
 {
+#if H_USE_MEMPOOL
 	ESP_LOGD(TAG, "Destroying SDIO mempool");
-	mempool_destroy(buf_mp_g);
+	hosted_mempool_destroy(buf_mp_g);
 	buf_mp_g = NULL;
+#endif
 }
 
 static inline void *sdio_buffer_alloc(uint need_memset)
 {
-	return mempool_alloc(buf_mp_g, MAX_SDIO_BUFFER_SIZE, need_memset);
+	MEMPOOL_ALLOC(buf_mp_g, MAX_SDIO_BUFFER_SIZE, need_memset);
 }
 
 static inline void sdio_buffer_free(void *buf)
 {
-	mempool_free(buf_mp_g, buf);
+	MEMPOOL_FREE(buf_mp_g, buf);
 }
 
 void bus_deinit_internal(void *bus_handle)
@@ -317,18 +360,24 @@ void bus_deinit_internal(void *bus_handle)
 #endif
 
 	// free memory allocated in double buffering structs
+#if H_SDIO_HOST_RX_MODE != H_SDIO_HOST_STREAMING_MODE
+#  define H_DOUBLE_BUF_FREE(p)  sdio_buffer_free(p)
+#else
+#  define H_DOUBLE_BUF_FREE(p)  g_h.funcs->_h_free_align(p)
+#endif
 	if (double_buf.buffer[0].buf) {
 		ESP_LOGI(TAG, "free buffer[0] %p", double_buf.buffer[0].buf);
-		g_h.funcs->_h_free_align(double_buf.buffer[0].buf);
+		H_DOUBLE_BUF_FREE(double_buf.buffer[0].buf);
 		double_buf.buffer[0].buf = NULL;
 		double_buf.buffer[0].buf_size = 0;
 	}
 	if (double_buf.buffer[1].buf) {
 		ESP_LOGI(TAG, "free buffer[1] %p", double_buf.buffer[1].buf);
-		g_h.funcs->_h_free_align(double_buf.buffer[1].buf);
+		H_DOUBLE_BUF_FREE(double_buf.buffer[1].buf);
 		double_buf.buffer[1].buf = NULL;
 		double_buf.buffer[1].buf_size = 0;
 	}
+#undef H_DOUBLE_BUF_FREE
 	/* Reset double_buf state for clean reinitialization */
 	double_buf.read_index = -1;
 	double_buf.read_data_len = 0;
@@ -337,6 +386,7 @@ void bus_deinit_internal(void *bus_handle)
 	/* Reset SDIO counters */
 	sdio_tx_buf_count = 0;
 	sdio_rx_byte_count = 0;
+	mempool_oom_logged = false;
 	sdio_start_write_thread = false;
 
 	sdio_mempool_destroy();
@@ -416,6 +466,19 @@ static int sdio_get_len_from_slave(uint32_t *rx_size, uint32_t reg_val, bool is_
 
 	len &= ESP_SLAVE_LEN_MASK;
 
+	/* A cumulative-length register read of all-ones (== ESP_SLAVE_LEN_MASK) is
+	 * the disconnected/errored SDIO bus signature: a floating bus reads back
+	 * 0xFF. It is NOT a real PKT_LEN. Streaming mode skips the upper-bound
+	 * check below, so without this guard the bogus value becomes a ~960 KB
+	 * read length ((0xFFFFF - consumed) wraps near ESP_RX_BYTE_MAX), the
+	 * RX-buffer alloc fails, and the host asserts/crashes. Treat it as a
+	 * transient bus error and drop this read — the next interrupt re-reads a
+	 * valid length. */
+	if (len == ESP_SLAVE_LEN_MASK) {
+		ESP_LOGW(TAG, "PKT_LEN reg all-ones (bus read error); dropping read");
+		return ESP_FAIL;
+	}
+
 	if (len >= sdio_rx_byte_count)
 		len = (len + ESP_RX_BYTE_MAX - sdio_rx_byte_count) % ESP_RX_BYTE_MAX;
 	else {
@@ -457,6 +520,19 @@ static int sdio_get_len_from_slave(uint32_t *rx_size, bool is_lock_needed)
 	}
 
 	len &= ESP_SLAVE_LEN_MASK;
+
+	/* A cumulative-length register read of all-ones (== ESP_SLAVE_LEN_MASK) is
+	 * the disconnected/errored SDIO bus signature: a floating bus reads back
+	 * 0xFF. It is NOT a real PKT_LEN. Streaming mode skips the upper-bound
+	 * check below, so without this guard the bogus value becomes a ~960 KB
+	 * read length ((0xFFFFF - consumed) wraps near ESP_RX_BYTE_MAX), the
+	 * RX-buffer alloc fails, and the host asserts/crashes. Treat it as a
+	 * transient bus error and drop this read — the next interrupt re-reads a
+	 * valid length. */
+	if (len == ESP_SLAVE_LEN_MASK) {
+		ESP_LOGW(TAG, "PKT_LEN reg all-ones (bus read error); dropping read");
+		return ESP_FAIL;
+	}
 
 	if (len >= sdio_rx_byte_count)
 		len = (len + ESP_RX_BYTE_MAX - sdio_rx_byte_count) % ESP_RX_BYTE_MAX;
@@ -587,7 +663,6 @@ static void sdio_write_task(void const* pvParameters)
 
 		if (!buf_handle.payload_zcopy) {
 			sendbuf = sdio_buffer_alloc(MEMSET_REQUIRED);
-			assert(sendbuf);
 			free_func = sdio_buffer_free;
 		} else {
 			sendbuf = buf_handle.payload;
@@ -595,9 +670,23 @@ static void sdio_write_task(void const* pvParameters)
 		}
 
 		if (!sendbuf) {
-			ESP_LOGE(TAG, "sdio buff malloc failed");
+			if (!mempool_oom_logged) {
+				ESP_LOGW(TAG, "mempool OOM start (TX)");
+				mempool_oom_logged = true;
+			}
 			free_func = NULL;
+#if ESP_PKT_STATS
+			if (buf_handle.if_type == ESP_STA_IF)
+				pkt_stats.sta_tx_out_drop++;
+#endif
 			goto done;
+		}
+
+		/* Non-zerocopy alloc just succeeded -> pool has space.
+		 * Zerocopy path doesn't touch the pool, so doesn't signal end. */
+		if (!buf_handle.payload_zcopy && mempool_oom_logged) {
+			ESP_LOGW(TAG, "mempool OOM end");
+			mempool_oom_logged = false;
 		}
 
 		if (buf_handle.payload_len > MAX_SDIO_BUFFER_SIZE - sizeof(struct esp_payload_header)) {
@@ -862,7 +951,7 @@ static esp_err_t sdio_push_data_to_queue(uint8_t * buf, uint32_t buf_len)
 		 * wrong header/bit packing?
 		 * */
 		ESP_LOGW(TAG, "Dropping packet");
-		HOSTED_FREE(buf);
+		sdio_buffer_free(buf);
 		return ESP_FAIL;
 	}
 
@@ -888,12 +977,22 @@ static uint8_t * sdio_rx_get_buffer(uint32_t len)
 	uint8_t ** buf = &double_buf.buffer[index].buf;
 
 	if (len > double_buf.buffer[index].buf_size) {
+		/* Allocate the larger buffer BEFORE freeing the old one. On a transient
+		 * heap shortage we degrade gracefully — keep the old buffer, leave the
+		 * slot consistent, and return NULL so the caller drops this read (the
+		 * slave resends / the RPC retries). This mirrors the mempool OOM
+		 * handling in sdio_push_data_to_queue() and replaces a hard assert that
+		 * crashed the host on transient memory pressure. */
+		uint8_t *newbuf = (uint8_t *)g_h.funcs->_h_malloc_align(len, HOSTED_MEM_ALIGNMENT_64);
+		if (!newbuf) {
+			ESP_LOGW(TAG, "RX buffer alloc failed (len=%lu); dropping read", (unsigned long)len);
+			return NULL;
+		}
 		if (*buf) {
-			// free already allocated memory
+			// free the old (smaller) buffer now that the new one is secured
 			g_h.funcs->_h_free_align(*buf);
 		}
-		*buf = (uint8_t *)g_h.funcs->_h_malloc_align(len, HOSTED_MEM_ALIGNMENT_64);
-		assert(*buf);
+		*buf = newbuf;
 		double_buf.buffer[index].buf_size = len;
 		ESP_LOGD(TAG, "buf %d size: %ld", index, double_buf.buffer[index].buf_size);
 	}
@@ -925,12 +1024,31 @@ static esp_err_t sdio_push_data_to_queue(uint8_t * buf, uint32_t buf_len)
 		}
 		/* Allocate rx buffer */
 		pkt_rxbuff = sdio_buffer_alloc(MEMSET_REQUIRED);
-		assert(pkt_rxbuff);
+		if (!pkt_rxbuff) {
+			if (!mempool_oom_logged) {
+				ESP_LOGW(TAG, "mempool OOM start (RX)");
+				mempool_oom_logged = true;
+			}
+			/* Skip this packet and continue processing remaining stream data */
+			packet_size = len + offset;
+			if (packet_size > buf_len) {
+				return ESP_FAIL;
+			}
+			buf_len -= packet_size;
+			buf     += packet_size;
+			continue;
+		}
+
+		if (mempool_oom_logged) {
+			ESP_LOGW(TAG, "mempool OOM end");
+			mempool_oom_logged = false;
+		}
 
 		packet_size = len + offset;
 		if (packet_size > buf_len) {
 			ESP_LOGE(TAG, "packet size[%lu]>[%lu] too big for remaining stream data",
 					packet_size, buf_len);
+			sdio_buffer_free(pkt_rxbuff);
 			return ESP_FAIL;
 		}
 		memcpy(pkt_rxbuff, buf, packet_size);
@@ -970,6 +1088,9 @@ static void sdio_data_to_rx_buf_task(void const* pvParameters)
 		if (sdio_push_data_to_queue(buf, len))
 			ESP_LOGE(TAG, "Failed to push data to rx queue");
 
+#if H_SDIO_HOST_RX_MODE != H_SDIO_HOST_STREAMING_MODE
+		double_buf.buffer[double_buf.read_index].buf = NULL;
+#endif
 		// finished sending data: reset read_index
 		double_buf.read_index = -1;
 	}
@@ -1159,7 +1280,12 @@ static void sdio_read_task(void const* pvParameters)
 
 		/* Allocate rx buffer */
 		rxbuff = sdio_rx_get_buffer(len_from_slave);
-		assert(rxbuff);
+		if (!rxbuff) {
+			/* Transient RX-buffer alloc failure: drop this read and retry on
+			 * the next interrupt instead of asserting (crashing) the host. */
+			SDIO_DRV_UNLOCK();
+			continue;
+		}
 
 		data_left = len_from_slave;
 		pos = rxbuff;
@@ -1383,7 +1509,7 @@ void *bus_init_internal(void)
 		assert(to_slave_queue[prio_q_idx]);
 	}
 
-	sdio_mempool_create();
+	sdio_mempool_create(tx_queue_size, rx_queue_size);
 
 	/* initialise SDMMC before starting read/write threads
 	 * which depend on SDMMC*/

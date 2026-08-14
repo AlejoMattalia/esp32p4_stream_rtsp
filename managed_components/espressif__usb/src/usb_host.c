@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/*
-Warning: The USB Host Library API is still a beta version and may be subject to change
-*/
-
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
@@ -28,6 +24,9 @@ Warning: The USB Host Library API is still a beta version and may be subject to 
 #include "hcd.h"
 #include "esp_private/usb_phy.h"
 #include "usb/usb_host.h"
+#ifdef  AUTO_PM_LIGHT_SLEEP
+#include "esp_private/sleep_event.h"        // For light sleep event callbacks
+#endif // AUTO_PM_LIGHT_SLEEP
 
 #if SOC_USB_OTG_SUPPORTED
 #include "esp_idf_version.h"
@@ -134,6 +133,7 @@ struct client_s {
         usb_host_client_event_cb_t event_callback;
         void *callback_arg;
         QueueHandle_t event_msg_queue;
+        bool notify_dev_removed;
     } constant;
 };
 
@@ -298,6 +298,39 @@ static void send_event_msg_to_clients(const usb_host_client_event_msg_t *event_m
     xSemaphoreGive(p_host_lib_obj->constant.mux_lock);
 }
 
+static void send_removed_event_msg_to_clients(uint8_t dev_addr)
+{
+    const usb_host_client_event_msg_t event_msg = {
+        .event = USB_HOST_CLIENT_EVENT_DEV_REMOVED,
+        .dev_removed = {
+            .address = dev_addr,
+        },
+    };
+
+    // Broadcast removal only to subscribers that do not own the device; owners receive DEV_GONE instead.
+    xSemaphoreTake(p_host_lib_obj->constant.mux_lock, portMAX_DELAY);
+    client_t *client_obj;
+    TAILQ_FOREACH(client_obj, &p_host_lib_obj->mux_protected.client_tailq, dynamic.tailq_entry) {
+        if (!client_obj->constant.notify_dev_removed) {
+            continue;
+        }
+        HOST_ENTER_CRITICAL();
+        bool opened = _check_client_opened_device(client_obj, dev_addr);
+        HOST_EXIT_CRITICAL();
+        if (opened) {
+            continue;
+        }
+        if (xQueueSend(client_obj->constant.event_msg_queue, &event_msg, 0) == pdTRUE) {
+            HOST_ENTER_CRITICAL();
+            _unblock_client(client_obj, false);
+            HOST_EXIT_CRITICAL();
+        } else {
+            ESP_LOGE(USB_HOST_TAG, "Client event message queue full when sending device removed");
+        }
+    }
+    xSemaphoreGive(p_host_lib_obj->constant.mux_lock);
+}
+
 // ---------------------------------------------------- Callbacks ------------------------------------------------------
 
 // ------------------- Library Related ---------------------
@@ -357,10 +390,11 @@ static void usbh_event_callback(usbh_event_data_t *event_data, void *arg)
         break;
     }
     case USBH_EVENT_DEV_GONE: {
-        if (hub_dev_gone(event_data->new_dev_data.dev_addr) == ESP_OK) {
+        if (hub_dev_gone(event_data->dev_gone_data.dev_addr) == ESP_OK) {
             // Device is a hub, we do not need to propagate the event to the clients
             break;
         }
+        send_removed_event_msg_to_clients(event_data->dev_gone_data.dev_addr);
         // Prepare a DEV GONE event, send only to clients that have opened the device
         usb_host_client_event_msg_t event_msg = {
             .event = USB_HOST_CLIENT_EVENT_DEV_GONE,
@@ -369,6 +403,9 @@ static void usbh_event_callback(usbh_event_data_t *event_data, void *arg)
         send_event_msg_to_clients(&event_msg, false, event_data->dev_gone_data.dev_addr);
         break;
     }
+    case USBH_EVENT_DEV_REMOVED:
+        send_removed_event_msg_to_clients(event_data->dev_removed_data.dev_addr);
+        break;
     case USBH_EVENT_DEV_FREE: {
         // Let the Hub driver know that the device is free and its node can be free and port re-enabled
         // Node could be already freed on device disconnect (when clients still holding the device opened), no need to verify result
@@ -492,6 +529,8 @@ static void get_config_desc_transfer_cb(usb_transfer_t *transfer)
     xSemaphoreGive(transfer_done);
 }
 
+// ------------------- Power management Related ----------------------
+
 /**
  * @brief Automatic suspend timer timer callback
  *
@@ -524,6 +563,82 @@ static void auto_suspend_timer_cb(TimerHandle_t xTimer)
     _unblock_lib(false);
     HOST_EXIT_CRITICAL();
 }
+
+#ifdef AUTO_PM_LIGHT_SLEEP
+/**
+ * @brief Callback function called before entering light sleep
+ *
+ * - Synchronously halt/flush all endpoints, set DWC root port suspend bit without HCD internal clock gating, and mark
+ *   the root hub and USBH device state as suspended (no public suspend API and no client suspend events yet).
+ * - Clients receive suspend event after exiting light sleep
+ *
+ * @param[in] user_arg User argument, not used
+ * @param[in] ext_arg External argument, not used
+ * @return
+ *    - ESP_OK: Root port auto-suspended by the light sleep callback, already suspended, not enabled or no device connected
+ *    - ESP_ERR_INVALID_STATE: usb host lib, or hub driver is not installed
+ *    - Other errors from hub_root_light_sleep_suspend_bus()
+ */
+static esp_err_t enter_light_sleep(void *user_arg, void *ext_arg)
+{
+    ESP_LOGV(USB_HOST_TAG, "Enter light sleep cb");
+    HOST_ENTER_CRITICAL();
+    HOST_CHECK_FROM_CRIT(p_host_lib_obj != NULL, ESP_ERR_INVALID_STATE);
+    HOST_EXIT_CRITICAL();
+
+    ESP_RETURN_ON_ERROR(hub_root_light_sleep_suspend_bus(), USB_HOST_TAG, "Failed to suspend root port before light sleep");
+    return ESP_OK;
+}
+
+/**
+ * @brief Callback function called after exiting light sleep
+ *
+ * - The function is called when the system wakes up from light sleep
+ * - The function only delivers deferred notification from the enter light sleep callback, in case the root port
+ *   was suspended from the enter_light_sleep callback
+ *
+ * @note This callback is called from a light sleep critical section
+ * @param[in] user_arg User argument, not used
+ * @param[in] ext_arg External argument, not used
+ * @return
+ *    - ESP_OK: Exit light sleep sequence successfully finished for the root port (suspend event will be delivered)
+ *              Or root port was not suspended by the enter_light_sleep callback (suspend event already delivered)
+ *    - ESP_ERR_INVALID_STATE: usb host lib, or hub driver is not installed
+ *    - ESP_ERR_NOT_ALLOWED: Root port is not in suspended state
+ */
+static esp_err_t exit_light_sleep(void *user_arg, void *ext_arg)
+{
+    ESP_EARLY_LOGV(USB_HOST_TAG, "Exit light sleep cb");
+    HOST_ENTER_CRITICAL();
+    HOST_CHECK_FROM_CRIT(p_host_lib_obj != NULL, ESP_ERR_INVALID_STATE);
+    HOST_EXIT_CRITICAL();
+
+    // Using ISR variant, because we are in a light sleep critical section
+    ESP_RETURN_ON_ERROR_ISR(hub_root_mark_exit_light_sleep(), USB_HOST_TAG, "Failed to do exit light sleep sequence on root port");
+    return ESP_OK;
+}
+
+/**
+ * @brief Callback configuration for enter light sleep event
+ */
+static const esp_sleep_event_cb_config_t enter_light_sleep_cb = {
+    .cb = enter_light_sleep,
+    .user_arg = NULL,
+    .prior = 2,
+    .next = NULL,
+};
+
+/**
+ * @brief Callback configuration for exit light sleep event
+ */
+static const esp_sleep_event_cb_config_t exit_light_sleep_cb = {
+    .cb = exit_light_sleep,
+    .user_arg = NULL,
+    .prior = 2,
+    .next = NULL,
+};
+
+#endif // AUTO_PM_LIGHT_SLEEP
 
 // ------------------------------------------------ Library Functions --------------------------------------------------
 
@@ -671,6 +786,12 @@ esp_err_t usb_host_install(const usb_host_config_t *config)
         goto hub_err;
     }
 
+    // Register light sleep callbacks to automatically suspend the root hub when light sleep is used
+#ifdef AUTO_PM_LIGHT_SLEEP
+    ESP_GOTO_ON_ERROR(esp_sleep_register_event_callback(SLEEP_EVENT_SW_GOTO_SLEEP, &enter_light_sleep_cb), sleep_cb_err, USB_HOST_TAG, "Failed to register goto light sleep callback");
+    ESP_GOTO_ON_ERROR(esp_sleep_register_event_callback(SLEEP_EVENT_SW_EXIT_SLEEP, &exit_light_sleep_cb), sleep_cb_err, USB_HOST_TAG, "Failed to register exit light sleep callback");
+#endif // AUTO_PM_LIGHT_SLEEP
+
     // Assign host library object
     HOST_ENTER_CRITICAL();
     if (p_host_lib_obj != NULL) {
@@ -690,6 +811,11 @@ esp_err_t usb_host_install(const usb_host_config_t *config)
     return ret;
 
 assign_err:
+#ifdef AUTO_PM_LIGHT_SLEEP
+sleep_cb_err:
+    ESP_ERROR_CHECK(esp_sleep_unregister_event_callback(SLEEP_EVENT_SW_GOTO_SLEEP, &enter_light_sleep));
+    ESP_ERROR_CHECK(esp_sleep_unregister_event_callback(SLEEP_EVENT_SW_EXIT_SLEEP, &exit_light_sleep));
+#endif // AUTO_PM_LIGHT_SLEEP
     ESP_ERROR_CHECK(hub_uninstall());
 hub_err:
     ESP_ERROR_CHECK(enum_uninstall());
@@ -726,6 +852,11 @@ esp_err_t usb_host_uninstall(void)
                          p_host_lib_obj->dynamic.flags.val == 0,
                          ESP_ERR_INVALID_STATE);
     HOST_EXIT_CRITICAL();
+
+#ifdef AUTO_PM_LIGHT_SLEEP
+    ESP_ERROR_CHECK(esp_sleep_unregister_event_callback(SLEEP_EVENT_SW_GOTO_SLEEP, &enter_light_sleep));
+    ESP_ERROR_CHECK(esp_sleep_unregister_event_callback(SLEEP_EVENT_SW_EXIT_SLEEP, &exit_light_sleep));
+#endif // AUTO_PM_LIGHT_SLEEP
 
     // Stop the root hub
     ESP_ERROR_CHECK(hub_root_stop());
@@ -1057,6 +1188,7 @@ esp_err_t usb_host_client_register(const usb_host_client_config_t *client_config
     client_obj->constant.event_callback = client_config->async.client_event_callback;
     client_obj->constant.callback_arg = client_config->async.callback_arg;
     client_obj->constant.event_msg_queue = event_msg_queue;
+    client_obj->constant.notify_dev_removed = client_config->flags.notify_dev_removed;
 
     // Add client to the host library's list of clients
     xSemaphoreTake(p_host_lib_obj->constant.mux_lock, portMAX_DELAY);
@@ -1855,10 +1987,11 @@ esp_err_t usb_host_transfer_submit(usb_transfer_t *transfer)
     // Check if the root port is suspended (global suspend)
     if (hub_root_is_suspended()) {
         // Root port is suspended at the time we are submitting a transfer
-        ESP_LOGD(USB_HOST_TAG, "Resuming the root port");
+        ESP_LOGD(USB_HOST_TAG, "Resuming the root port by transfer submit");
 
         ret = usb_host_lib_root_port_resume();
         if (ret != ESP_OK) {
+            ESP_LOGW(USB_HOST_TAG, "Root port resume before transfer submit failed: %s", esp_err_to_name(ret));
             goto submit_err;
         }
     }
@@ -1900,10 +2033,11 @@ esp_err_t usb_host_transfer_submit_control(usb_host_client_handle_t client_hdl, 
     // Check if the root port is suspended (global suspend)
     if (hub_root_is_suspended()) {
         // Root port is suspended at the time we are submitting a ctrl transfer
-        ESP_LOGD(USB_HOST_TAG, "Resuming the root port");
+        ESP_LOGD(USB_HOST_TAG, "Resuming the root port by CTRL transfer submit");
 
         ret = usb_host_lib_root_port_resume();
         if (ret != ESP_OK) {
+            ESP_LOGW(USB_HOST_TAG, "Root port resume before control transfer submit failed: %s", esp_err_to_name(ret));
             goto submit_err;
         }
     }

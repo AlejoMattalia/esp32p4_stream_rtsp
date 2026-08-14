@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] - 2026-05-25
+
+### Added
+
+- Added NV12 stream format parsing for UVC uncompressed descriptors.
+
+### Fixed
+
+- Fixed regression from version 2.5.0 where unreasonably large URBs could be allocated, leading to out-of-memory scenarios. Now, if urb_size == 0, we allocate URB of size 4x MPS. For other urb_sizes, user's value is used to provide flexibility.
+- Fixed unsupported UVC formats leaking into the frame list when descriptor parsing returns an invalid format.
+- Fixed bulk frame reconstruction for non-conforming cameras that can send a same-frame payload header without EOF after a short data packet, as observed on some 4K and high-resolution cameras.
+
 ## [2.5.0] - 2026-04-13
 
 ### Added

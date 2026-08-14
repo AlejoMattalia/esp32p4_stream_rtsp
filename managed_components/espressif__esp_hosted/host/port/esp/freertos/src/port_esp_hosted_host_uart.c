@@ -34,20 +34,6 @@ static const char TAG[] = "uart_wrapper";
 		if (!x) return ESP_FAIL;      \
 	} while (0);
 
-// these values should match ESP_HOSTED_UART_PARITY values in Hosted Kconfig
-enum {
-	HOSTED_UART_PARITY_NONE = 0,
-	HOSTED_UART_PARITY_EVEN = 1,
-	HOSTED_UART_PARITY_ODD = 2,
-};
-
-// these values should match ESP_HOSTED_UART_STOP_BITS values in Hosted Kconfig
-enum {
-	HOSTED_STOP_BITS_1 = 0,
-	HOSTED_STOP_BITS_1_5 = 1,
-	HOSTED_STOP_BITS_2 = 2,
-};
-
 // UART context structure
 typedef struct uart_ctx_t {
 	int uart_port;
@@ -90,64 +76,15 @@ int hosted_uart_flush_input(void * ctx)
 
 void * hosted_uart_init(void)
 {
-	uart_word_length_t uart_word_length;
-	uart_parity_t parity;
-	uart_stop_bits_t stop_bits;
-
 	ctx = (uart_ctx_t*)g_h.funcs->_h_malloc(sizeof(uart_ctx_t));
 	assert(ctx);
-
-	switch (H_UART_NUM_DATA_BITS) {
-	case 5:
-		uart_word_length = UART_DATA_5_BITS;
-		break;
-	case 6:
-		uart_word_length = UART_DATA_6_BITS;
-		break;
-	case 7:
-		uart_word_length = UART_DATA_7_BITS;
-		break;
-	case 8:
-		// drop through to default
-	default:
-		uart_word_length = UART_DATA_8_BITS;
-		break;
-	}
-
-	switch (H_UART_PARITY) {
-	case HOSTED_UART_PARITY_EVEN: // even parity
-		parity = UART_PARITY_EVEN;
-		break;
-	case HOSTED_UART_PARITY_ODD: // odd parity
-		parity = UART_PARITY_ODD;
-		break;
-	case HOSTED_UART_PARITY_NONE: // none
-		// drop through to default
-	default:
-		parity = UART_PARITY_DISABLE;
-		break;
-	}
-
-	switch (H_UART_STOP_BITS) {
-	case HOSTED_STOP_BITS_1_5: // 1.5 stop bits
-		stop_bits = UART_STOP_BITS_1_5;
-		break;
-	case HOSTED_STOP_BITS_2: // 2 stop bits
-		stop_bits = UART_STOP_BITS_2;
-		break;
-	case HOSTED_STOP_BITS_1: // 1 stop bits
-		// drop through to default
-	default:
-		stop_bits = UART_STOP_BITS_1;
-		break;
-	}
 
 	// initialise bus and device in ctx
 	const uart_config_t uart_config = {
 		.baud_rate = H_UART_BAUD_RATE,
-		.data_bits = uart_word_length,
-		.parity = parity,
-		.stop_bits = stop_bits,
+		.data_bits = H_UART_NUM_DATA_BITS,
+		.parity = H_UART_PARITY,
+		.stop_bits = H_UART_STOP_BITS,
 		.flow_ctrl = H_UART_FLOWCTRL,
 		.source_clk = H_UART_CLK_SRC,
 	};

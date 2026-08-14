@@ -45,6 +45,7 @@ enum uvc_host_stream_format {
     UVC_VS_FORMAT_YUY2,        /*!< YUY2 stream format. */
     UVC_VS_FORMAT_H264,        /*!< H.264 stream format. */
     UVC_VS_FORMAT_H265,        /*!< H.265 stream format. */
+    UVC_VS_FORMAT_NV12,        /*!< NV12 stream format. */
 };
 
 /**
@@ -199,7 +200,7 @@ typedef struct {
         size_t frame_size;           /*!< Frame buffer size. Use 0 to take dwMaxVideoFrameSize from negotiation. */
         uint32_t frame_heap_caps;    /*!< Memory capabilities for frame buffers passed to heap_caps_malloc(). */
         int number_of_urbs;          /*!< Number of URBs used by this stream. Triple buffering is recommended. */
-        size_t urb_size;             /*!< Size in bytes of one URB. Larger values trade memory for fewer interrupts. */
+        size_t urb_size;             /*!< Size in bytes of one URB. Larger values trade memory for fewer interrupts. Set to 0 to use the default size, which is 4x MPS */
         uint8_t **user_frame_buffers; /*!< Optional user-provided frame buffers. NULL lets the driver allocate them. */
     } advanced;                       /*!< Advanced buffering and transfer settings. */
 } uvc_host_stream_config_t;

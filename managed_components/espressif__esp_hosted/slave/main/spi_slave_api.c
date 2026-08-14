@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,6 +29,15 @@
 #include "esp_hosted_interface.h"
 #include "slave_wifi_config.h"
 #include "esp_hosted_coprocessor_fw_ver.h"
+
+#include "slave_util.h"
+#include "slave_config.h"
+#include "mempool.h"
+
+#if H_USE_MEMPOOL
+// memory should be 4 byte aligned for DMA access
+#define MEM_ALIGNMENT_BYTES          4
+#endif
 
 static const char TAG[] = "SPI_DRIVER";
 /* SPI settings */
@@ -111,6 +120,22 @@ static uint8_t hosted_constructs_init_done = 0;
   #define H_DR_PULL_REGISTER                         GPIO_PULLUP_ONLY
 #endif
 
+#if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)) && (ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0))
+/**
+ * For ESP-IDF v5.5, Building ESP32 with UART Transport can fail due to
+ * lack of IRAM space.
+ * To reduce IRAM usage
+ * - `CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y`
+ * should be enabled
+ */
+#if CONFIG_IDF_TARGET_ESP32 && !CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH
+#error Building for SPI-FD transport can fail due to lack of IRAM space
+#error To free up IRAM, enable Component config --> ESP Ringbuf ---> Place non-ISR ringbuf functions into flash
+#error or uncomment
+#error CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y in sdkconfig.defaults.esp32 and regenerate sdkconfig
+#endif
+#endif
+
 static interface_context_t context;
 static interface_handle_t if_handle_g;
 static SemaphoreHandle_t spi_tx_sem;
@@ -139,61 +164,94 @@ if_ops_t if_ops = {
 };
 
 #define SPI_MEMPOOL_NUM_BLOCKS     ((SPI_TX_QUEUE_SIZE+SPI_RX_QUEUE_SIZE)+SPI_QUEUE_SIZE*2)
-static struct hosted_mempool * buf_mp_tx_g;
-static struct hosted_mempool * buf_mp_rx_g;
-static struct hosted_mempool * trans_mp_g;
+
+#if H_USE_MEMPOOL
+static hosted_mempool_t * buf_mp_tx_g;
+static hosted_mempool_t * buf_mp_rx_g;
+static hosted_mempool_t * trans_mp_g;
+#endif
+
+#define USE_SEPARATE_MEMPOOLS 0
 
 static inline void spi_mempool_create(void)
 {
-	buf_mp_tx_g = hosted_mempool_create(NULL, 0,
-			SPI_MEMPOOL_NUM_BLOCKS, SPI_BUFFER_SIZE);
+#if H_USE_MEMPOOL
+	hosted_mempool_config_t config = {
+		.pre_allocated_mem = NULL,
+		.pre_allocated_mem_size = 0,
+		.num_blocks = SPI_MEMPOOL_NUM_BLOCKS,
+		.block_size = SPI_BUFFER_SIZE,
+		.alignment_in_bytes = MEM_ALIGNMENT_BYTES,
+		.malloc = slave_util_malloc,
+		.calloc = slave_util_calloc,
+		.memset = memset,
+		.free   = free,
+	};
+
+	buf_mp_tx_g = hosted_mempool_create(&config);
+
+#if USE_SEPARATE_MEMPOOLS
+	buf_mp_rx_g = hosted_mempool_create(&config);
+#else
 	/* reuse the mempool, as same size, can be separate, if needed */
 	buf_mp_rx_g = buf_mp_tx_g;
-	trans_mp_g = hosted_mempool_create(NULL, 0,
-			SPI_MEMPOOL_NUM_BLOCKS, sizeof(spi_slave_transaction_t));
-#if CONFIG_ESP_CACHE_MALLOC
+#endif
+
+	config.block_size = sizeof(spi_slave_transaction_t);
+	trans_mp_g = hosted_mempool_create(&config);
+
 	assert(buf_mp_tx_g);
 	assert(buf_mp_rx_g);
 	assert(trans_mp_g);
-#else
-	ESP_LOGI(TAG, "Using dynamic heap for mem alloc");
-#endif
+#endif // H_USE_MEMPOOL
 }
+
+static int rx_buf_allocated = 0;
+static int tx_buf_allocated = 0;
 
 static inline void spi_mempool_destroy(void)
 {
+#if H_USE_MEMPOOL
 	hosted_mempool_destroy(buf_mp_tx_g);
+#if USE_SEPARATE_MEMPOOLS
+	hosted_mempool_destroy(buf_mp_rx_g);
+#endif
 	hosted_mempool_destroy(trans_mp_g);
+#endif // #if H_USE_MEMPOOL
 }
 
 static inline void *spi_buffer_tx_alloc(uint need_memset)
 {
-	return hosted_mempool_alloc(buf_mp_tx_g, SPI_BUFFER_SIZE, need_memset);
+	tx_buf_allocated++;
+	MEMPOOL_ALLOC(buf_mp_tx_g, SPI_BUFFER_SIZE, need_memset);
 }
 
 static inline void *spi_buffer_rx_alloc(uint need_memset)
 {
-	return hosted_mempool_alloc(buf_mp_rx_g, SPI_BUFFER_SIZE, need_memset);
+	rx_buf_allocated++;
+	MEMPOOL_ALLOC(buf_mp_rx_g, SPI_BUFFER_SIZE, need_memset);
 }
 
 static inline spi_slave_transaction_t *spi_trans_alloc(uint need_memset)
 {
-	return hosted_mempool_alloc(trans_mp_g, sizeof(spi_slave_transaction_t), need_memset);
+	MEMPOOL_ALLOC(trans_mp_g, sizeof(spi_slave_transaction_t), need_memset);
 }
 
 static inline void spi_buffer_tx_free(void *buf)
 {
-	hosted_mempool_free(buf_mp_tx_g, buf);
+	tx_buf_allocated--;
+	MEMPOOL_FREE(buf_mp_tx_g, buf);
 }
 
 static inline void spi_buffer_rx_free(void *buf)
 {
-	hosted_mempool_free(buf_mp_rx_g, buf);
+	rx_buf_allocated--;
+	MEMPOOL_FREE(buf_mp_rx_g, buf);
 }
 
 static inline void spi_trans_free(spi_slave_transaction_t *trans)
 {
-	hosted_mempool_free(trans_mp_g, trans);
+	MEMPOOL_FREE(trans_mp_g, trans);
 }
 volatile uint8_t data_ready_flag = 0;
 #define set_handshake_gpio()     ESP_EARLY_LOGD(TAG, "+ set handshake gpio");gpio_set_level(GPIO_HANDSHAKE, 1);
@@ -297,6 +355,14 @@ void generate_startup_event(uint8_t cap, uint32_t ext_cap)
 	*pos = ESP_PRIV_CAPABILITY;         pos++;len++;
 	*pos = LENGTH_1_BYTE;               pos++;len++;
 	*pos = cap;                         pos++;len++;
+
+	/* TLV - Extended Capability */
+	*pos = ESP_PRIV_CAP_EXT;            pos++;len++;
+	*pos = LENGTH_4_BYTE;               pos++;len++;
+	*pos = (ext_cap) & 0xFF;            pos++;len++;
+	*pos = (ext_cap >> 8) & 0xFF;       pos++;len++;
+	*pos = (ext_cap >> 16) & 0xFF;      pos++;len++;
+	*pos = (ext_cap >> 24) & 0xFF;      pos++;len++;
 
 	*pos = ESP_PRIV_TEST_RAW_TP;        pos++;len++;
 	*pos = LENGTH_1_BYTE;               pos++;len++;
@@ -531,6 +597,8 @@ static void queue_next_transaction(void)
 	/* Attach Rx Buffer */
 	spi_trans->rx_buffer = spi_buffer_rx_alloc(MEMSET_REQUIRED);
 	if (unlikely(!spi_trans->rx_buffer)) {
+		ESP_LOGE(TAG, "rx_buf_allocated %d", rx_buf_allocated);
+		ESP_LOGE(TAG, "tx_buf_allocated %d", tx_buf_allocated);
 		assert(spi_trans->rx_buffer);
 	}
 

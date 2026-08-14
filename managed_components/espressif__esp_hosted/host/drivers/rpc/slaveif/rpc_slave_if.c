@@ -358,6 +358,12 @@ ctrl_cmd_t * rpc_slaveif_wifi_get_inactive_time(ctrl_cmd_t *req)
 	RPC_DECODE_RSP_IF_NOT_ASYNC();
 }
 
+ctrl_cmd_t * rpc_slaveif_wifi_disable_pmf_config(ctrl_cmd_t *req)
+{
+	RPC_SEND_REQ(RPC_ID__Req_WifiDisablePmfConfig);
+	RPC_DECODE_RSP_IF_NOT_ASYNC();
+}
+
 #if H_WIFI_HE_SUPPORT
 ctrl_cmd_t * rpc_slaveif_wifi_sta_twt_config(ctrl_cmd_t *req)
 {
@@ -671,10 +677,11 @@ ctrl_cmd_t * rpc_slave_iface_set_mem_monitor(ctrl_cmd_t *req)
 #endif
 
 #ifdef H_PEER_DATA_TRANSFER
-int rpc_slaveif_register_custom_callback(uint32_t msg_id,
-		void (*callback)(uint32_t msg_id, const uint8_t *data, size_t data_len))
+int rpc_slaveif_register_custom_callback(uint32_t msg_id_exp,
+		void (*callback)(uint32_t msg_id_recvd, const uint8_t *data_recvd, size_t data_len_recvd, void *local_context),
+		void *local_context)
 {
-	return rpc_evt_register_custom_callback(msg_id, callback);
+	return rpc_evt_register_custom_callback(msg_id_exp, callback, local_context);
 }
 
 ctrl_cmd_t * rpc_slaveif_custom_rpc(ctrl_cmd_t *req)

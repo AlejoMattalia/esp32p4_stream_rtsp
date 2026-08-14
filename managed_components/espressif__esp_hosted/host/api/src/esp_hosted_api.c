@@ -13,6 +13,7 @@ extern "C" {
 #include "esp_hosted_api_priv.h"
 #include "esp_hosted_wifi_remote_glue.h"
 #include "port_esp_hosted_host_wifi_config.h"
+#include "port_esp_hosted_host_openthread.h"
 #include "port_esp_hosted_host_os.h"
 #include "esp_hosted_misc.h"
 #include "esp_check.h"
@@ -23,6 +24,10 @@ extern "C" {
 
 #if H_DPP_SUPPORT
 #include "esp_dpp.h"
+#endif
+
+#if H_HOST_OT_ENABLE
+#include "esp_hosted_openthread.h"
 #endif
 
 /** Macros **/
@@ -75,7 +80,7 @@ static void create_esp_hosted_transport_up_sem(void)
 esp_err_t esp_hosted_setup(void)
 {
 	create_esp_hosted_transport_up_sem();
-	g_h.funcs->_h_get_semaphore(transport_up_sem, portMAX_DELAY);
+	g_h.funcs->_h_get_semaphore(transport_up_sem, HOSTED_BLOCK_MAX);
 	g_h.funcs->_h_post_semaphore(transport_up_sem);
 	return ESP_OK;
 }
@@ -496,6 +501,12 @@ esp_err_t esp_wifi_remote_get_inactive_time(wifi_interface_t ifx, uint16_t *sec)
 	return rpc_wifi_get_inactive_time(ifx, sec);
 }
 
+esp_err_t esp_wifi_remote_disable_pmf_config(wifi_interface_t ifx)
+{
+	check_transport_up();
+	return rpc_wifi_disable_pmf_config(ifx);
+}
+
 #if H_WIFI_HE_SUPPORT
 esp_err_t esp_wifi_remote_sta_twt_config(wifi_twt_config_t *config)
 {
@@ -900,6 +911,38 @@ esp_err_t esp_hosted_set_mem_monitor(esp_hosted_config_mem_monitor_t *config, es
 }
 #endif
 
+#if H_HOST_OT_ENABLE
+esp_err_t esp_hosted_openthread_rcp_init(void)
+{
+	check_transport_up();
+	return rpc_iface_openthread_rcp_init();
+}
+
+esp_err_t esp_hosted_openthread_rcp_deinit(void)
+{
+	check_transport_up();
+	return rpc_iface_openthread_rcp_deinit();
+}
+
+esp_err_t esp_hosted_openthread_rcp_start(void)
+{
+	check_transport_up();
+	return rpc_iface_openthread_rcp_start();
+}
+
+esp_err_t esp_hosted_openthread_rcp_stop(void)
+{
+	check_transport_up();
+	return rpc_iface_openthread_rcp_stop();
+}
+
+esp_err_t esp_hosted_openthread_rcp_query(esp_hosted_openthread_query_t query)
+{
+	check_transport_up();
+	return rpc_iface_openthread_rcp_query(query);
+}
+#endif
+
 /* esp_err_t esp_wifi_remote_scan_get_ap_record(wifi_ap_record_t *ap_record)
 esp_err_t esp_wifi_remote_set_csi(_Bool en)
 esp_err_t esp_wifi_remote_set_csi_rx_cb(wifi_csi_cb_t cb, void *ctx)
@@ -925,7 +968,6 @@ esp_err_t esp_wifi_remote_config_11b_rate(wifi_interface_t ifx, _Bool disable)
 esp_err_t esp_wifi_remote_connectionless_module_set_wake_interval(uint16_t wake_interval)
 esp_err_t esp_wifi_remote_force_wakeup_acquire(void)
 esp_err_t esp_wifi_remote_force_wakeup_release(void)
-esp_err_t esp_wifi_remote_disable_pmf_config(wifi_interface_t ifx)
 esp_err_t esp_wifi_remote_set_event_mask(uint32_t mask)
 esp_err_t esp_wifi_remote_get_event_mask(uint32_t *mask)
 esp_err_t esp_wifi_remote_80211_tx(wifi_interface_t ifx, const void *buffer, int len, _Bool en_sys_seq)

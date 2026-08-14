@@ -65,6 +65,9 @@
 	#define H_SLAVE_LWIP_DHCP_AT_SLAVE       1
 #endif
 
+#if CONFIG_OPENTHREAD_ENABLED
+#include "slave_openthread.h"
+#endif
 
 static const char *TAG = "co-pro-main";
 
@@ -179,6 +182,9 @@ static uint32_t get_capabilities_ext(void)
 #elif (CONFIG_ESP_SPI_HD_INTERFACE_NUM_DATA_LINES == 2)
 	ESP_LOGI(TAG, "- SPI HD 2-bit interface");
 	ext_cap |= ESP_SPI_HD_INTERFACE_SUPPORT_2_DATA_LINES;
+#elif (CONFIG_ESP_SPI_HD_INTERFACE_NUM_DATA_LINES == 1)
+	ESP_LOGI(TAG, "- SPI HD 1-bit interface");
+	ext_cap |= ESP_SPI_HD_INTERFACE_SUPPORT_1_DATA_LINE;
 #else
 #error "Invalid SPI HD Number of Data Bits configuration"
 #endif
@@ -200,6 +206,10 @@ static uint32_t get_capabilities_ext(void)
 
 #ifdef CONFIG_ESP_HOSTED_CP_BT
 	ext_cap |= get_bluetooth_ext_capabilities();
+#endif
+
+#if CONFIG_ESP_HOSTED_OT_RCP_ENABLED
+	ext_cap |= get_ot_ext_capabilities();
 #endif
 	ESP_LOGI(TAG, "extended capabilities: 0x%"PRIx32, ext_cap);
 
