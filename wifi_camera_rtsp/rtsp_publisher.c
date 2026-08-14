@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -305,12 +306,25 @@ static int publish_session(void)
     ESP_LOGI(TAG, "Transmitiendo %s hacia AWS", s_config.camera_id);
     s_sequence = 0;
     drain_frames();
+    uint32_t sent_frames = 0;
+    int64_t stats_started_at = esp_timer_get_time();
     while (s_running) {
         encoded_frame_t *frame = NULL;
         if (xQueueReceive(g_encoded_frame_queue, &frame, pdMS_TO_TICKS(1000)) == pdTRUE) {
             int result = send_frame(socket_fd, frame);
             encoded_frame_free(frame);
             if (result != 0) break;
+            sent_frames++;
+            int64_t now = esp_timer_get_time();
+            if (now - stats_started_at >= 5000000) {
+                uint32_t fps_x10 = (uint32_t)(((uint64_t)sent_frames * 10000000ULL) /
+                                               (uint64_t)(now - stats_started_at));
+                ESP_LOGI(TAG, "Publicacion estable: %u.%u FPS, cola=%u/8",
+                         fps_x10 / 10, fps_x10 % 10,
+                         (unsigned)uxQueueMessagesWaiting(g_encoded_frame_queue));
+                sent_frames = 0;
+                stats_started_at = now;
+            }
         }
     }
     close(socket_fd);

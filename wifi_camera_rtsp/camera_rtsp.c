@@ -504,7 +504,9 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
 	g_cam_fps = cfg->fps ? cfg->fps : 20;
     g_sps_pps_cache.lock = xSemaphoreCreateMutex();
     g_sps_pps_cache.valid = false;
-	g_encoded_frame_queue = xQueueCreate(3, sizeof(encoded_frame_t *));
+	/* Absorbe rafagas de IDR sin forzar un resync continuo. A 20 FPS
+	 * representa como maximo unos 400 ms de cola. */
+	g_encoded_frame_queue = xQueueCreate(8, sizeof(encoded_frame_t *));
 	ESP_RETURN_ON_FALSE(g_encoded_frame_queue && g_sps_pps_cache.lock, ESP_ERR_NO_MEM, TAG, "no se pudieron crear cola/mutex");
 
     esp_video_init_csi_config_t csi_cfg = 

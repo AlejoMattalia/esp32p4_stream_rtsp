@@ -40,8 +40,8 @@ void app_main(void)
     cam_rtsp_config_t cfg;
     cam_rtsp_config_default(&cfg);
     cfg.resolution = CAM_RTSP_RES_720P;   // <-- cambiar aca si se quiere 720p
-    cfg.fps = 15;
-    cfg.bitrate_bps = 1000000;
+    cfg.fps = 20;
+    cfg.bitrate_bps = 1200000;
 
     ESP_ERROR_CHECK(cam_rtsp_init(&cfg));
     ESP_ERROR_CHECK(cam_rtsp_start_capture());
