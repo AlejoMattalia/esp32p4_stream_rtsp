@@ -278,7 +278,7 @@ static int publish_session(void)
     int status = request(socket_fd, cseq++, "ANNOUNCE", base_url, NULL, sdp, response, sizeof(response));
     if (status != 200) { ESP_LOGE(TAG, "ANNOUNCE rechazado: HTTP %d\nRespuesta completa:\n%s", status, response); close(socket_fd); return -1; }
     status = request(socket_fd, cseq++, "SETUP", track_url,
-                     "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n", NULL,
+                     "Transport: RTP/AVP/TCP;unicast;interleaved=0-1;mode=record\r\n", NULL,
                      response, sizeof(response));
     if (status != 200) { ESP_LOGE(TAG, "SETUP rechazado: HTTP %d\nRespuesta completa:\n%s", status, response); close(socket_fd); return -1; }
     const char *session_header = strstr(response, "Session:");

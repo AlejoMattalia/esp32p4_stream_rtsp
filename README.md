@@ -11,6 +11,9 @@
 `device_config.h` está versionado por decisión del proyecto. No usar claves de
 producción en repositorios públicos.
 
+Por seguridad, los logs no deben imprimir `Authorization`, `Device secret` ni
+la URL RTSP completa con credenciales. Basic Base64 codifica, pero no cifra.
+
 Servidor RTSP para streaming en vivo desde un ESP32-P4 con cámara OV5647 (CSI + ISP) y encoder H.264 por hardware (V4L2 M2M). Pensado como firmware de validación/desarrollo, no para producción.
 
 ## Archivos principales
