@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/uio.h>
 #include <netinet/tcp.h>
 #include <unistd.h>
 
@@ -23,6 +22,7 @@
 #define RTP_MAX_PAYLOAD 1200
 #define RESPONSE_SIZE 2048
 #define SDP_SIZE 768
+#define TX_BATCH_SIZE (16 * 1024)
 
 static const char *TAG = "[RTSP_PUB]";
 static rtsp_publisher_config_t s_config;
@@ -30,6 +30,8 @@ static TaskHandle_t s_task;
 static volatile bool s_running;
 static uint16_t s_sequence;
 static uint32_t s_ssrc = 0x415E9001;
+static uint8_t s_tx_batch[TX_BATCH_SIZE];
+static size_t s_tx_batch_length;
 
 static int send_all(int socket_fd, const void *data, size_t length)
 {
@@ -43,21 +45,26 @@ static int send_all(int socket_fd, const void *data, size_t length)
     return 0;
 }
 
-static int send_vectors(int socket_fd, struct iovec *iov, int count)
+static int flush_batch(int socket_fd)
 {
-    while (count > 0) {
-        struct msghdr message = {.msg_iov = iov, .msg_iovlen = (size_t)count};
-        ssize_t sent = sendmsg(socket_fd, &message, 0);
-        if (sent <= 0) return -1;
-        while (count > 0 && sent >= (ssize_t)iov[0].iov_len) {
-            sent -= (ssize_t)iov[0].iov_len;
-            iov++;
-            count--;
-        }
-        if (count > 0 && sent > 0) {
-            iov[0].iov_base = (uint8_t *)iov[0].iov_base + sent;
-            iov[0].iov_len -= (size_t)sent;
-        }
+    if (s_tx_batch_length == 0) return 0;
+    int result = send_all(socket_fd, s_tx_batch, s_tx_batch_length);
+    s_tx_batch_length = 0;
+    return result;
+}
+
+static int append_batch(int socket_fd, const void *data, size_t length)
+{
+    const uint8_t *cursor = data;
+    while (length > 0) {
+        size_t available = TX_BATCH_SIZE - s_tx_batch_length;
+        if (available == 0 && flush_batch(socket_fd) != 0) return -1;
+        available = TX_BATCH_SIZE - s_tx_batch_length;
+        size_t chunk = length < available ? length : available;
+        memcpy(s_tx_batch + s_tx_batch_length, cursor, chunk);
+        s_tx_batch_length += chunk;
+        cursor += chunk;
+        length -= chunk;
     }
     return 0;
 }
@@ -142,7 +149,7 @@ static int request(int socket_fd, int cseq, const char *method, const char *url,
             method, url, cseq, authorization, extra_headers ? extra_headers : "");
     if (header_length <= 0 || (size_t)header_length >= sizeof(header)) return -1;
 
-    ESP_LOGI(TAG, "=== REQUEST %s ===\n%s", method, header);
+    ESP_LOGI(TAG, "RTSP %s %s", method, url);
     if (body && body_length > 0) {
         ESP_LOGI(TAG, "=== BODY %s ===\n%s", method, body);
     }
@@ -197,8 +204,8 @@ static int send_rtp_payload(int socket_fd, const uint8_t *payload, size_t payloa
     header[10] = (uint8_t)(timestamp >> 8); header[11] = (uint8_t)timestamp;
     header[12] = (uint8_t)(s_ssrc >> 24); header[13] = (uint8_t)(s_ssrc >> 16);
     header[14] = (uint8_t)(s_ssrc >> 8); header[15] = (uint8_t)s_ssrc;
-    struct iovec vectors[2] = {{header, sizeof(header)}, {(void *)payload, payload_length}};
-    return send_vectors(socket_fd, vectors, 2);
+    if (append_batch(socket_fd, header, sizeof(header)) != 0) return -1;
+    return append_batch(socket_fd, payload, payload_length);
 }
 
 static int send_nal(int socket_fd, const uint8_t *nal, size_t nal_length,
@@ -227,8 +234,9 @@ static int send_nal(int socket_fd, const uint8_t *nal, size_t nal_length,
         rtp_header[10]=(uint8_t)(timestamp>>8); rtp_header[11]=(uint8_t)timestamp;
         rtp_header[12]=(uint8_t)(s_ssrc>>24); rtp_header[13]=(uint8_t)(s_ssrc>>16);
         rtp_header[14]=(uint8_t)(s_ssrc>>8); rtp_header[15]=(uint8_t)s_ssrc;
-        struct iovec vectors[3]={{rtp_header,sizeof(rtp_header)},{payload_header,2},{(void *)cursor,chunk}};
-        if (send_vectors(socket_fd, vectors, 3) != 0) return -1;
+        if (append_batch(socket_fd, rtp_header, sizeof(rtp_header)) != 0 ||
+            append_batch(socket_fd, payload_header, sizeof(payload_header)) != 0 ||
+            append_batch(socket_fd, cursor, chunk) != 0) return -1;
         cursor += chunk; remaining -= chunk; first = false;
     }
     return 0;
@@ -257,7 +265,8 @@ static int send_frame(int socket_fd, const encoded_frame_t *frame)
         if (send_nal(socket_fd, frame->data + nals[index].start, nals[index].length,
                      frame->rtp_timestamp, index == count - 1) != 0) return -1;
     }
-    return count ? 0 : -1;
+    if (!count) return -1;
+    return flush_batch(socket_fd);
 }
 
 static void drain_frames(void)
@@ -305,24 +314,35 @@ static int publish_session(void)
 
     ESP_LOGI(TAG, "Transmitiendo %s hacia AWS", s_config.camera_id);
     s_sequence = 0;
+    s_tx_batch_length = 0;
     drain_frames();
     uint32_t sent_frames = 0;
+    uint64_t sent_bytes = 0;
+    size_t largest_frame = 0;
     int64_t stats_started_at = esp_timer_get_time();
     while (s_running) {
         encoded_frame_t *frame = NULL;
         if (xQueueReceive(g_encoded_frame_queue, &frame, pdMS_TO_TICKS(1000)) == pdTRUE) {
             int result = send_frame(socket_fd, frame);
+            size_t frame_length = frame->len;
             encoded_frame_free(frame);
             if (result != 0) break;
             sent_frames++;
+            sent_bytes += frame_length;
+            if (frame_length > largest_frame) largest_frame = frame_length;
             int64_t now = esp_timer_get_time();
             if (now - stats_started_at >= 5000000) {
                 uint32_t fps_x10 = (uint32_t)(((uint64_t)sent_frames * 10000000ULL) /
                                                (uint64_t)(now - stats_started_at));
-                ESP_LOGI(TAG, "Publicacion estable: %u.%u FPS, cola=%u/8",
+                uint32_t bitrate_kbps = (uint32_t)((sent_bytes * 8000ULL) /
+                                                   (uint64_t)(now - stats_started_at));
+                ESP_LOGI(TAG, "Publicacion: %u.%u FPS, %u kbps, frame_max=%u KB, cola=%u/8",
                          fps_x10 / 10, fps_x10 % 10,
+                         bitrate_kbps, (unsigned)(largest_frame / 1024),
                          (unsigned)uxQueueMessagesWaiting(g_encoded_frame_queue));
                 sent_frames = 0;
+                sent_bytes = 0;
+                largest_frame = 0;
                 stats_started_at = now;
             }
         }
