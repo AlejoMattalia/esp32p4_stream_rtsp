@@ -568,7 +568,8 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
         ctrl[0].id    = V4L2_CID_MPEG_VIDEO_BITRATE;
         ctrl[0].value = s_cfg.bitrate_bps;
         ctrl[1].id    = V4L2_CID_MPEG_VIDEO_H264_I_PERIOD;	// V4L2_CID_MPEG_VIDEO_GOP_SIZE;
-        ctrl[1].value = g_cam_fps; // keyframe cada ~1 segundo
+        /* Un IDR cada ~2 segundos reduce picos sin comprometer la recuperacion. */
+        ctrl[1].value = g_cam_fps * 2;
         /* esp-video espera el ID de la clase, igual que sus ejemplos M2M. */
         ctrls.ctrl_class = V4L2_CID_CODEC_CLASS;
         ctrls.count      = 2;
