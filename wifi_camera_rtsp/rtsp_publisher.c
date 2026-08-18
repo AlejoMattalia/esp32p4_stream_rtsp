@@ -22,7 +22,7 @@
 #define RTP_MAX_PAYLOAD 1200
 #define RESPONSE_SIZE 2048
 #define SDP_SIZE 768
-#define TX_BATCH_SIZE (16 * 1024)
+#define TX_BATCH_SIZE (32 * 1024)
 
 static const char *TAG = "[RTSP_PUB]";
 static rtsp_publisher_config_t s_config;
@@ -86,7 +86,12 @@ static int connect_server(void)
         setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
         if (connect(socket_fd, address->ai_addr, address->ai_addrlen) == 0) {
             int enabled = 1;
-            int send_buffer_size = 32 * 1024;
+            /*
+             * La publicacion cruza Internet y el RTT observado hacia AWS ronda
+             * 250 ms. Un buffer de 32 KiB no alcanza para sostener 1.2 Mbps
+             * durante un RTT completo; deja margen para los picos de los IDR.
+             */
+            int send_buffer_size = 128 * 1024;
             setsockopt(socket_fd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
             setsockopt(socket_fd, SOL_SOCKET, SO_KEEPALIVE, &enabled, sizeof(enabled));
             setsockopt(socket_fd, SOL_SOCKET, SO_SNDBUF,
@@ -336,7 +341,11 @@ static int publish_session(void)
                                                (uint64_t)(now - stats_started_at));
                 uint32_t bitrate_kbps = (uint32_t)((sent_bytes * 8000ULL) /
                                                    (uint64_t)(now - stats_started_at));
+<<<<<<< HEAD
                 ESP_LOGI(TAG, "Publicacion: %u.%u FPS, %u kbps, frame_max=%u KB, cola=%u/16",
+=======
+                ESP_LOGI(TAG, "Publicacion: %u.%u FPS, %u kbps, frame_max=%u KB, cola=%u",
+>>>>>>> c91cea7ce63aba1ef65603d71d4b85b14f5ad85e
                          fps_x10 / 10, fps_x10 % 10,
                          bitrate_kbps, (unsigned)(largest_frame / 1024),
                          (unsigned)uxQueueMessagesWaiting(g_encoded_frame_queue));
