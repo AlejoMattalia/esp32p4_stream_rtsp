@@ -569,12 +569,28 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
         ctrl[0].value = s_cfg.bitrate_bps;
         ctrl[1].id    = V4L2_CID_MPEG_VIDEO_H264_I_PERIOD;	// V4L2_CID_MPEG_VIDEO_GOP_SIZE;
         ctrl[1].value = g_cam_fps; // keyframe cada ~1 segundo
-        ctrls.ctrl_class = V4L2_CTRL_CLASS_MPEG;
+        /* esp-video espera el ID de la clase, igual que sus ejemplos M2M. */
+        ctrls.ctrl_class = V4L2_CID_CODEC_CLASS;
         ctrls.count      = 2;
         ctrls.controls   = ctrl;
         if (ioctl(s_h264_fd, VIDIOC_S_EXT_CTRLS, &ctrls) != 0) 
 		{
-            ESP_LOGW(TAG, "No se pudieron fijar bitrate/GOP (control no soportado en esta version del componente), se usan valores por defecto del encoder");
+            ESP_LOGW(TAG, "No se pudieron fijar bitrate/GOP (%s); se usan valores por defecto del encoder",
+                     strerror(errno));
+		} else {
+            struct v4l2_ext_control read_ctrl[2] = { 0 };
+            struct v4l2_ext_controls read_ctrls = { 0 };
+            read_ctrl[0].id = V4L2_CID_MPEG_VIDEO_BITRATE;
+            read_ctrl[1].id = V4L2_CID_MPEG_VIDEO_H264_I_PERIOD;
+            read_ctrls.ctrl_class = V4L2_CID_CODEC_CLASS;
+            read_ctrls.count = 2;
+            read_ctrls.controls = read_ctrl;
+            if (ioctl(s_h264_fd, VIDIOC_G_EXT_CTRLS, &read_ctrls) == 0) {
+                ESP_LOGI(TAG, "Encoder confirmado: bitrate=%ld bps, GOP=%ld frames",
+                         (long)read_ctrl[0].value, (long)read_ctrl[1].value);
+            } else {
+                ESP_LOGW(TAG, "No se pudo verificar bitrate/GOP (%s)", strerror(errno));
+            }
         }
     }
 
