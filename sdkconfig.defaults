@@ -1,0 +1,6 @@
+# TCP RTSP publisher: ventana suficiente para 1.2 Mbps con ~250 ms de RTT.
+# Sin estos valores, el default de 5760 bytes limita la subida a ~180 kbps.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
