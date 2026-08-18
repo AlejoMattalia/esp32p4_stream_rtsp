@@ -341,11 +341,7 @@ static int publish_session(void)
                                                (uint64_t)(now - stats_started_at));
                 uint32_t bitrate_kbps = (uint32_t)((sent_bytes * 8000ULL) /
                                                    (uint64_t)(now - stats_started_at));
-<<<<<<< HEAD
                 ESP_LOGI(TAG, "Publicacion: %u.%u FPS, %u kbps, frame_max=%u KB, cola=%u/16",
-=======
-                ESP_LOGI(TAG, "Publicacion: %u.%u FPS, %u kbps, frame_max=%u KB, cola=%u",
->>>>>>> c91cea7ce63aba1ef65603d71d4b85b14f5ad85e
                          fps_x10 / 10, fps_x10 % 10,
                          bitrate_kbps, (unsigned)(largest_frame / 1024),
                          (unsigned)uxQueueMessagesWaiting(g_encoded_frame_queue));
