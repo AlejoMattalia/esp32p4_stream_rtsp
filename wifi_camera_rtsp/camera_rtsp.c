@@ -347,7 +347,7 @@ static void capture_task(void *arg)
 
 	uint32_t rtp_ts = 0;
     int64_t t_stream_start_us = esp_timer_get_time();
-	bool wait_for_keyframe = false;
+	int64_t next_encode_us = t_stream_start_us;
 	
 	// static uint32_t s_enc_out_idx = 0;
     ESP_LOGI(TAG, "Tarea de captura/encoding iniciada (%ux%u @ %u fps, %lu bps)", g_cam_width, g_cam_height, g_cam_fps, (unsigned long)s_cfg.bitrate_bps);
@@ -364,6 +364,19 @@ static void capture_task(void *arg)
 			// vTaskDelay(pdMS_TO_TICKS(10));
 			continue;
         }
+
+        /*
+         * Algunos drivers ignoran VIDIOC_S_PARM y entregan unos 34 FPS aunque
+         * se hayan solicitado 20. Limitamos antes del encoder para no producir
+         * mas frames de los que la publicacion necesita.
+         */
+        int64_t capture_now_us = esp_timer_get_time();
+        int64_t frame_period_us = 1000000LL / (g_cam_fps ? g_cam_fps : 20);
+        if (capture_now_us < next_encode_us) {
+            ioctl(s_video_fd, VIDIOC_QBUF, &cap_buf);
+            continue;
+        }
+        next_encode_us = capture_now_us + frame_period_us;
 
 		// 2) Pasar el puntero de la camara DIRECTAMENTE al encoder (Zero-Copy V4L2)
         struct v4l2_buffer enc_out = { 0 };
@@ -391,14 +404,6 @@ static void capture_task(void *arg)
             cache_sps_pps_if_needed(src, len);
             bool is_keyframe = h264_is_keyframe(src, len);
 
-            if (wait_for_keyframe && !is_keyframe) {
-                ioctl(s_h264_fd, VIDIOC_QBUF, &enc_cap);
-                goto reclaim_encoder_input;
-            }
-            if (is_keyframe) {
-                wait_for_keyframe = false;
-            }
-
             encoded_frame_t *frame = heap_caps_malloc(sizeof(encoded_frame_t), MALLOC_CAP_DEFAULT);
             if (frame) 
             {
@@ -417,15 +422,17 @@ static void capture_task(void *arg)
 
                     if (xQueueSend(g_encoded_frame_queue, &frame, 0) != pdTRUE) 
                     {
+                        /*
+                         * Mantener video reciente: reemplazar solamente el
+                         * frame mas antiguo. Vaciar toda la cola y esperar al
+                         * siguiente IDR convertia cualquier pico en ~1 FPS.
+                         */
                         encoded_frame_t *old = NULL;
-                        while (xQueueReceive(g_encoded_frame_queue, &old, 0) == pdTRUE) {
+                        if (xQueueReceive(g_encoded_frame_queue, &old, 0) == pdTRUE) {
                             encoded_frame_free(old);
                         }
-                        if (is_keyframe) {
-                            xQueueSend(g_encoded_frame_queue, &frame, 0);
-                        } else {
+                        if (xQueueSend(g_encoded_frame_queue, &frame, 0) != pdTRUE) {
                             encoded_frame_free(frame);
-                            wait_for_keyframe = true;
                         }
                     }
                 } else 
@@ -442,8 +449,6 @@ static void capture_task(void *arg)
         }
 
         // 4) Reclamar el buffer USERPTR consumido por el encoder
-reclaim_encoder_input:
-        ;
         struct v4l2_buffer enc_out_done = { 0 };
         enc_out_done.type   = V4L2_BUF_TYPE_VIDEO_OUTPUT;
         enc_out_done.memory = V4L2_MEMORY_USERPTR;
@@ -504,9 +509,9 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
 	g_cam_fps = cfg->fps ? cfg->fps : 20;
     g_sps_pps_cache.lock = xSemaphoreCreateMutex();
     g_sps_pps_cache.valid = false;
-	/* Absorbe rafagas de IDR sin forzar un resync continuo. A 20 FPS
-	 * representa como maximo unos 400 ms de cola. */
-	g_encoded_frame_queue = xQueueCreate(8, sizeof(encoded_frame_t *));
+	/* Absorbe rafagas breves sin acumular latencia visible. A 20 FPS
+	 * representa como maximo unos 150 ms de cola. */
+	g_encoded_frame_queue = xQueueCreate(3, sizeof(encoded_frame_t *));
 	ESP_RETURN_ON_FALSE(g_encoded_frame_queue && g_sps_pps_cache.lock, ESP_ERR_NO_MEM, TAG, "no se pudieron crear cola/mutex");
 
     esp_video_init_csi_config_t csi_cfg = 
