@@ -39,9 +39,9 @@ void app_main(void)
     // consola, etc. Para esta validacion queda fijo en el codigo.
     cam_rtsp_config_t cfg;
     cam_rtsp_config_default(&cfg);
-    cfg.resolution = CAM_RTSP_RES_720P;   // <-- cambiar aca si se quiere 720p
-    cfg.fps = 20;
-    cfg.bitrate_bps = 1200000;
+    cfg.resolution = CAM_RTSP_RES_800X800;   // <-- cambiar aca si se quiere 720p
+    cfg.fps = 20;     // Aumentado a 20 FPS para fluidez
+    cfg.bitrate_bps = 2500000;  // Aumentado a 2.5 Mbps para mejor calidad
 
     ESP_ERROR_CHECK(cam_rtsp_init(&cfg));
     ESP_ERROR_CHECK(cam_rtsp_start_capture());

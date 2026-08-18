@@ -56,9 +56,9 @@
 /******************************************************************************
     Defines and constants
 ******************************************************************************/
-#define CAP_BUF_COUNT   				(2)
-#define ENC_OUT_COUNT   				(2)
-#define ENC_CAP_COUNT					(2)
+#define CAP_BUF_COUNT   				(6)
+#define ENC_OUT_COUNT   				(6)
+#define ENC_CAP_COUNT					(6)
 
 #define CAM_SCCB_I2C_PORT				(0)
 #define CAM_SCCB_SCL_GPIO 				(8)
@@ -349,6 +349,13 @@ static void capture_task(void *arg)
     int64_t t_stream_start_us = esp_timer_get_time();
 	bool wait_for_keyframe = false;
 	
+	// Contadores para diagnosticar el pipeline
+	uint32_t cam_dqbuf_ok = 0, cam_dqbuf_fail = 0;
+	uint32_t enc_qbuf_ok = 0, enc_qbuf_fail = 0;
+	uint32_t enc_dqbuf_ok = 0, enc_dqbuf_fail = 0;
+	uint32_t queue_ok = 0, queue_fail = 0;
+	int64_t last_diag_time = esp_timer_get_time();
+	
 	// static uint32_t s_enc_out_idx = 0;
     ESP_LOGI(TAG, "Tarea de captura/encoding iniciada (%ux%u @ %u fps, %lu bps)", g_cam_width, g_cam_height, g_cam_fps, (unsigned long)s_cfg.bitrate_bps);
 
@@ -360,10 +367,11 @@ static void capture_task(void *arg)
         cap_buf.memory = V4L2_MEMORY_MMAP;
         if (ioctl(s_video_fd, VIDIOC_DQBUF, &cap_buf) != 0) 
 		{
-            ESP_LOGW(TAG, "DQBUF camara fallo (%s)", strerror(errno));
+            cam_dqbuf_fail++;
 			// vTaskDelay(pdMS_TO_TICKS(10));
 			continue;
         }
+		cam_dqbuf_ok++;
 
 		// 2) Pasar el puntero de la camara DIRECTAMENTE al encoder (Zero-Copy V4L2)
         struct v4l2_buffer enc_out = { 0 };
@@ -376,8 +384,10 @@ static void capture_task(void *arg)
 
         if (ioctl(s_h264_fd, VIDIOC_QBUF, &enc_out) != 0) 
         {
-            ESP_LOGW(TAG, "QBUF encoder OUTPUT USERPTR fallo (%s)", strerror(errno));
-        } 
+            enc_qbuf_fail++;
+        } else {
+			enc_qbuf_ok++;
+		}
 
         // 3) Sacar el frame ya codificado en H.264
         struct v4l2_buffer enc_cap = { 0 };
@@ -386,6 +396,7 @@ static void capture_task(void *arg)
         
         if (ioctl(s_h264_fd, VIDIOC_DQBUF, &enc_cap) == 0) 
         {
+			enc_dqbuf_ok++;
             uint8_t *src = (uint8_t *)s_enc_cap_bufs[enc_cap.index].start;
             size_t len = enc_cap.bytesused;
             cache_sps_pps_if_needed(src, len);
@@ -417,17 +428,21 @@ static void capture_task(void *arg)
 
                     if (xQueueSend(g_encoded_frame_queue, &frame, 0) != pdTRUE) 
                     {
+                        queue_fail++;
                         encoded_frame_t *old = NULL;
                         while (xQueueReceive(g_encoded_frame_queue, &old, 0) == pdTRUE) {
                             encoded_frame_free(old);
                         }
                         if (is_keyframe) {
                             xQueueSend(g_encoded_frame_queue, &frame, 0);
+                            queue_ok++;
                         } else {
                             encoded_frame_free(frame);
                             wait_for_keyframe = true;
                         }
-                    }
+                    } else {
+						queue_ok++;
+					}
                 } else 
                 {
                     heap_caps_free(frame);
@@ -438,7 +453,7 @@ static void capture_task(void *arg)
 			
         } else 
         {
-            ESP_LOGW(TAG, "DQBUF CAPTURE fallo (%s)", strerror(errno));
+            enc_dqbuf_fail++;
         }
 
         // 4) Reclamar el buffer USERPTR consumido por el encoder
@@ -449,14 +464,30 @@ reclaim_encoder_input:
         enc_out_done.memory = V4L2_MEMORY_USERPTR;
         if (ioctl(s_h264_fd, VIDIOC_DQBUF, &enc_out_done) != 0) 
         {
-            ESP_LOGW(TAG, "DQBUF encoder OUTPUT USERPTR fallo (%s)", strerror(errno));
+            // Silenciamos estos warnings pues son muy frecuentes
         }
 
         // 5) Devolver la memoria original a la camara para volver a capturar
         ioctl(s_video_fd, VIDIOC_QBUF, &cap_buf);
+		
 		// Timestamp RTP basado en reloj interno
         int64_t elapsed_us = esp_timer_get_time() - t_stream_start_us;
         rtp_ts = (uint32_t)((elapsed_us * 90000) / 1000000);
+		
+		// Log de diagnóstico cada 5 segundos
+		int64_t now = esp_timer_get_time();
+		if (now - last_diag_time >= 5000000) {
+			ESP_LOGI(TAG, "DIAGNOSTICO PIPELINE: cam_ok=%u cam_fail=%u | enc_qbuf_ok=%u enc_qbuf_fail=%u | enc_dqbuf_ok=%u enc_dqbuf_fail=%u | queue_ok=%u queue_fail=%u",
+					cam_dqbuf_ok, cam_dqbuf_fail,
+					enc_qbuf_ok, enc_qbuf_fail,
+					enc_dqbuf_ok, enc_dqbuf_fail,
+					queue_ok, queue_fail);
+			cam_dqbuf_ok = cam_dqbuf_fail = 0;
+			enc_qbuf_ok = enc_qbuf_fail = 0;
+			enc_dqbuf_ok = enc_dqbuf_fail = 0;
+			queue_ok = queue_fail = 0;
+			last_diag_time = now;
+		}
     }
 
     vTaskDelete(NULL);
@@ -505,8 +536,8 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
     g_sps_pps_cache.lock = xSemaphoreCreateMutex();
     g_sps_pps_cache.valid = false;
 	/* Absorbe rafagas de IDR sin forzar un resync continuo. A 20 FPS
-	 * representa como maximo unos 400 ms de cola. */
-	g_encoded_frame_queue = xQueueCreate(8, sizeof(encoded_frame_t *));
+	 * representa como maximo unos 800 ms de cola con 16 frames. */
+	g_encoded_frame_queue = xQueueCreate(16, sizeof(encoded_frame_t *));
 	ESP_RETURN_ON_FALSE(g_encoded_frame_queue && g_sps_pps_cache.lock, ESP_ERR_NO_MEM, TAG, "no se pudieron crear cola/mutex");
 
     esp_video_init_csi_config_t csi_cfg = 
@@ -563,7 +594,7 @@ esp_err_t cam_rtsp_init(const cam_rtsp_config_t *cfg)
         ctrl[0].id    = V4L2_CID_MPEG_VIDEO_BITRATE;
         ctrl[0].value = s_cfg.bitrate_bps;
         ctrl[1].id    = V4L2_CID_MPEG_VIDEO_H264_I_PERIOD;	// V4L2_CID_MPEG_VIDEO_GOP_SIZE;
-        ctrl[1].value = g_cam_fps; // keyframe cada ~1 segundo
+        ctrl[1].value = 1; // CRUCIAL: cada frame es keyframe para asegurar output continuo @ 20 FPS
         ctrls.ctrl_class = V4L2_CTRL_CLASS_MPEG;
         ctrls.count      = 2;
         ctrls.controls   = ctrl;
