@@ -7,6 +7,11 @@ dependencies:
   idf:
     version: ">=5.5"
 
+  # Desde ESP-IDF 6 el componente integrado `json` fue removido.
+  # cJSON se distribuye mediante el IDF Component Manager.
+  espressif/cjson:
+    version: "^1.7.19"
+
   # Framework V4L2 oficial de Espressif: maneja el pipeline
   # CSI -> ISP -> encoder H.264 por hardware (/dev/video0, /dev/video11).
   # esp_cam_sensor (driver OV5647) NO se declara aca a mano: esp_video
