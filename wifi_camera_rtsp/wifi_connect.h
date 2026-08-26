@@ -17,6 +17,7 @@
 ******************************************************************************/
 #pragma once
 #include "esp_err.h"
+#include "anny_config.h"
 /******************************************************************************
         Constants
 ******************************************************************************/
@@ -39,7 +40,8 @@ extern "C" {
  *
  * Devuelve ESP_OK si quedo conectado, ESP_FAIL en caso contrario.
  */
-esp_err_t wifi_connect_start(void);
+esp_err_t wifi_connect_start(const anny_config_t *config);
+esp_err_t wifi_start_provisioning(void);
 
 /** Devuelve la IP actual en formato "a.b.c.d", o "0.0.0.0" si no hay link. */
 void wifi_connect_get_ip_str(char *out, size_t out_len);

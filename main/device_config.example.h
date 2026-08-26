@@ -1,10 +1,10 @@
 #pragma once
 
-/* Copiar como device_config.h y completar con los datos reales. */
-#define ANNY_WIFI_SSID       "NOMBRE_DEL_WIFI"
-#define ANNY_WIFI_PASSWORD   "CONTRASENA_DEL_WIFI"
-
-#define ANNY_CAMERA_ID       "camera_XXXXXXXXXXXX"
-#define ANNY_DEVICE_SECRET   "SECRETO_DEL_PANEL"
+/* Servidor fijo; la identidad se obtiene usando el código de activación. */
 #define ANNY_SERVER_HOST     "3.15.63.191"
 #define ANNY_SERVER_PORT     8554
+
+/* WiFi e identidad no se compilan: se reciben desde la app. */
+#define ANNY_PROVISIONING_AP_PREFIX   "ANNY-CAM-"
+#define ANNY_PROVISIONING_AP_PASSWORD "annysetup"
+#define ANNY_PROVISIONING_HTTP_PORT   80

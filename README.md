@@ -2,14 +2,19 @@
 
 ## Publicación en Anny/AWS
 
-1. Crear una placa en `http://3.15.63.191/camera-admin/`.
-2. Completar `main/device_config.h` con Wi-Fi, Camera ID y Device secret.
-3. Compilar y flashear. El firmware publica por RTSP/TCP en MediaMTX mediante
+1. Crear una placa en el panel de cámaras y obtener su ID y secreto.
+2. Compilar y flashear. En el primer arranque la placa crea `ANNY-CAM-xxxxxx`
+   (clave `annysetup`).
+3. En Anny abrir **Dispositivos > Lentes con cámara ESP32 > Conectar**, ingresar
+   el código de activación y el WiFi del lugar. La app canjea el código por la
+   identidad de publicación y envía todo a la placa.
+4. El firmware reinicia y publica por RTSP/TCP en MediaMTX mediante
    `ANNOUNCE`, `SETUP` y `RECORD`, y se reconecta automáticamente.
-4. Vincular la placa desde Anny con el código de activación.
+5. Vincular la placa desde Anny con el código de activación.
 
-`device_config.h` está versionado por decisión del proyecto. No usar claves de
-producción en repositorios públicos.
+Si la red guardada no está disponible, la placa vuelve a crear su red
+`ANNY-CAM-xxxxxx` para poder configurarla en una ubicación nueva. La IP y el
+puerto permanecen fijos en `device_config.h`; WiFi, ID y secreto quedan en NVS.
 
 Por seguridad, los logs no deben imprimir `Authorization`, `Device secret` ni
 la URL RTSP completa con credenciales. Basic Base64 codifica, pero no cifra.
