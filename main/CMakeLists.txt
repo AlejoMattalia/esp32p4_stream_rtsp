@@ -6,6 +6,7 @@ file(GLOB srcs_files "../wifi_camera_rtsp/*.c")
 idf_component_register(
     SRCS
         "main.c"
+        "anny_config.c"
         ${srcs_files}
 
     INCLUDE_DIRS
@@ -18,6 +19,8 @@ idf_component_register(
         esp_netif
         esp_event
         nvs_flash
+        esp_http_server
+        json
         lwip
         esp_timer
         mbedtls
