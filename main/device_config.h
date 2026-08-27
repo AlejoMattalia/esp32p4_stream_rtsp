@@ -5,6 +5,6 @@
 #define ANNY_SERVER_PORT     8554
 
 /* Red local temporal utilizada por el conector de Anny. */
-#define ANNY_PROVISIONING_AP_PREFIX   "ANNY-CAM-"
+#define ANNY_PROVISIONING_AP_SSID     "ANNY-CAM"
 #define ANNY_PROVISIONING_AP_PASSWORD "annysetup"
 #define ANNY_PROVISIONING_HTTP_PORT   80

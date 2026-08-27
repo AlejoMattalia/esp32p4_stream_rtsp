@@ -5,7 +5,6 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
-#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
@@ -122,16 +121,11 @@ static esp_err_t health_handler(httpd_req_t *request)
 esp_err_t wifi_start_provisioning(void)
 {
     ESP_ERROR_CHECK(wifi_initialize());
-    uint8_t mac[6];
-    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
-    char name[33];
-    snprintf(name, sizeof(name), "%s%02X%02X%02X", ANNY_PROVISIONING_AP_PREFIX,
-             mac[3], mac[4], mac[5]);
     wifi_config_t access_point = {0};
-    strlcpy((char *)access_point.ap.ssid, name, sizeof(access_point.ap.ssid));
+    strlcpy((char *)access_point.ap.ssid, ANNY_PROVISIONING_AP_SSID, sizeof(access_point.ap.ssid));
     strlcpy((char *)access_point.ap.password, ANNY_PROVISIONING_AP_PASSWORD,
             sizeof(access_point.ap.password));
-    access_point.ap.ssid_len = strlen(name);
+    access_point.ap.ssid_len = strlen(ANNY_PROVISIONING_AP_SSID);
     access_point.ap.max_connection = 2;
     access_point.ap.authmode = WIFI_AUTH_WPA2_PSK;
     esp_wifi_stop();
@@ -146,7 +140,8 @@ esp_err_t wifi_start_provisioning(void)
     const httpd_uri_t configure = {.uri="/api/config", .method=HTTP_POST, .handler=config_handler};
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &health));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &configure));
-    ESP_LOGW(TAG, "Configuración activa en %s (clave %s)", name, ANNY_PROVISIONING_AP_PASSWORD);
+    ESP_LOGW(TAG, "Configuración activa en %s (clave %s)", ANNY_PROVISIONING_AP_SSID,
+             ANNY_PROVISIONING_AP_PASSWORD);
     return ESP_OK;
 }
 
