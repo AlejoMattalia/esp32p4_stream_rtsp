@@ -6,6 +6,7 @@
 #include "anny_config.h"
 #include "device_config.h"
 #include "rtsp_publisher.h"
+#include "ble_provisioning.h"
 
 #include "esp_heap_caps.h"
 
@@ -16,8 +17,8 @@ void app_main(void)
     ESP_ERROR_CHECK(anny_config_init());
     anny_config_t device;
     if (anny_config_load(&device) != ESP_OK) {
-        ESP_LOGW(TAG, "Placa sin configurar; iniciando red de configuración");
-        ESP_ERROR_CHECK(wifi_start_provisioning());
+        ESP_LOGW(TAG, "Placa sin configurar; iniciando Bluetooth");
+        ESP_ERROR_CHECK(ble_provisioning_start(true));
         return;
     }
     ESP_LOGI(TAG, "Validacion de streaming RTSP - ESP32-P4 + OV5647");
@@ -27,8 +28,8 @@ void app_main(void)
 	
     if (wifi_connect_start(&device) != ESP_OK)
 	{
-        ESP_LOGW(TAG, "Falló la red guardada; iniciando red de configuración");
-        ESP_ERROR_CHECK(wifi_start_provisioning());
+        ESP_LOGW(TAG, "Falló la red guardada; iniciando Bluetooth");
+        ESP_ERROR_CHECK(ble_provisioning_start(false));
         return;
     }
 
