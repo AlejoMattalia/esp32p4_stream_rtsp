@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -17,6 +18,7 @@
 #include "freertos/task.h"
 #include "mbedtls/base64.h"
 #include "rtsp_server.h"
+#include "anny_config.h"
 
 #define RTP_PAYLOAD_TYPE 96
 #define RTP_MAX_PAYLOAD 1200
@@ -37,6 +39,20 @@ static uint16_t s_sequence;
 static uint32_t s_ssrc = 0x415E9001;
 static uint8_t s_tx_batch[TX_BATCH_SIZE];
 static size_t s_tx_batch_length;
+static unsigned s_auth_failures;
+
+static void handle_auth_failure(void)
+{
+    s_auth_failures++;
+    if (s_auth_failures < 3) return;
+    ESP_LOGE(TAG, "Credenciales rechazadas 3 veces; borrando vinculacion y reiniciando en BLE");
+    if (anny_config_clear() != ESP_OK) {
+        ESP_LOGE(TAG, "No se pudo borrar la vinculacion guardada");
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+}
 
 static int send_all(int socket_fd, const void *data, size_t length)
 {
@@ -307,7 +323,13 @@ static int publish_session(void)
     snprintf(track_url, sizeof(track_url), "%s/trackID=0", base_url);
     int cseq = 1;
     int status = request(socket_fd, cseq++, "ANNOUNCE", base_url, NULL, sdp, response, sizeof(response));
-    if (status != 200) { ESP_LOGE(TAG, "ANNOUNCE rechazado: HTTP %d\nRespuesta completa:\n%s", status, response); close(socket_fd); return -1; }
+    if (status != 200) {
+        ESP_LOGE(TAG, "ANNOUNCE rechazado: HTTP %d\nRespuesta completa:\n%s", status, response);
+        if (status == 401) handle_auth_failure();
+        close(socket_fd);
+        return -1;
+    }
+    s_auth_failures = 0;
     status = request(socket_fd, cseq++, "SETUP", track_url,
                      "Transport: RTP/AVP/TCP;unicast;interleaved=0-1;mode=record\r\n", NULL,
                      response, sizeof(response));

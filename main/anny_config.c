@@ -50,6 +50,18 @@ esp_err_t anny_config_save(const anny_config_t *config)
     return err;
 }
 
+esp_err_t anny_config_clear(void)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(CONFIG_NAMESPACE, NVS_READWRITE, &handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (err != ESP_OK) return err;
+    err = nvs_erase_all(handle);
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    return err;
+}
+
 bool anny_config_is_valid(const anny_config_t *config)
 {
     return config && config->wifi_ssid[0] && config->camera_id[0] && config->device_secret[0];

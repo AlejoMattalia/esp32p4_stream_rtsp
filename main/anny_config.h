@@ -12,4 +12,5 @@ typedef struct {
 esp_err_t anny_config_init(void);
 esp_err_t anny_config_load(anny_config_t *config);
 esp_err_t anny_config_save(const anny_config_t *config);
+esp_err_t anny_config_clear(void);
 bool anny_config_is_valid(const anny_config_t *config);
