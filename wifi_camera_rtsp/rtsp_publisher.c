@@ -26,6 +26,11 @@
 
 static const char *TAG = "[RTSP_PUB]";
 static rtsp_publisher_config_t s_config;
+/* s_config se usa desde una tarea que sobrevive a app_main. No puede conservar
+ * punteros a la anny_config_t local de app_main; mantiene copias propias. */
+static char s_host[128];
+static char s_camera_id[64];
+static char s_device_secret[128];
 static TaskHandle_t s_task;
 static volatile bool s_running;
 static uint16_t s_sequence;
@@ -107,7 +112,7 @@ static int connect_server(void)
 
 static void basic_authorization(char *output, size_t output_size)
 {
-    char credentials[160];
+    char credentials[256];
     char encoded[256];
     size_t encoded_length = 0;
     snprintf(credentials, sizeof(credentials), "%s:%s", s_config.camera_id, s_config.device_secret);
@@ -123,6 +128,8 @@ static void basic_authorization(char *output, size_t output_size)
 
 static int receive_response(int socket_fd, char *response, size_t response_size)
 {
+    if (!response || response_size == 0) return -1;
+    response[0] = '\0';
     size_t used = 0;
     while (used + 1 < response_size) {
         ssize_t received = recv(socket_fd, response + used, response_size - used - 1, 0);
@@ -373,7 +380,19 @@ esp_err_t rtsp_publisher_start(const rtsp_publisher_config_t *config)
 {
     if (!config || !config->host || !config->camera_id || !config->device_secret) return ESP_ERR_INVALID_ARG;
     if (s_running) return ESP_OK;
-    s_config = *config;
+    if (strnlen(config->host, sizeof(s_host)) >= sizeof(s_host) ||
+        strnlen(config->camera_id, sizeof(s_camera_id)) >= sizeof(s_camera_id) ||
+        strnlen(config->device_secret, sizeof(s_device_secret)) >= sizeof(s_device_secret))
+        return ESP_ERR_INVALID_SIZE;
+    strlcpy(s_host, config->host, sizeof(s_host));
+    strlcpy(s_camera_id, config->camera_id, sizeof(s_camera_id));
+    strlcpy(s_device_secret, config->device_secret, sizeof(s_device_secret));
+    s_config = (rtsp_publisher_config_t) {
+        .host = s_host,
+        .port = config->port,
+        .camera_id = s_camera_id,
+        .device_secret = s_device_secret,
+    };
     s_running = true;
     BaseType_t created = xTaskCreatePinnedToCore(publisher_task, "rtsp_publisher", 12288,
                                                  NULL, 9, &s_task, 0);
